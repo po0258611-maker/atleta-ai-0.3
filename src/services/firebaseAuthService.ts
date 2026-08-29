@@ -5,6 +5,8 @@ import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   onIdTokenChanged,
   User,
   signOut,
@@ -17,7 +19,6 @@ export const auth = getAuth(app);
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
-
 auth.useDeviceLanguage();
 
 export type AuthState = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
@@ -55,11 +56,9 @@ let currentAthlete: AuthenticatedAthlete | null = null;
 export const getIdToken = (): string | null => currentIdToken;
 export const getAuthenticatedAthlete = (): AuthenticatedAthlete | null => currentAthlete;
 
-/** Returns a fresh Firebase ID token for authenticated API requests. */
 export const getFreshIdToken = async (): Promise<string | null> => {
   const user = auth.currentUser;
   if (!user) return null;
-
   const token = await user.getIdToken();
   currentIdToken = token;
   return token;
@@ -73,7 +72,6 @@ const buildProfileFromFirebaseUser = (user: User): UserProfile => ({
 export const buildAthleteFromFirebaseUser = async (user: User): Promise<AuthenticatedAthlete> => {
   const token = await user.getIdToken();
   currentIdToken = token;
-
   const athlete: AuthenticatedAthlete = {
     uid: user.uid,
     email: user.email || 'atleta@google.com',
@@ -82,23 +80,19 @@ export const buildAthleteFromFirebaseUser = async (user: User): Promise<Authenti
     idToken: token,
     profile: buildProfileFromFirebaseUser(user),
   };
-
   currentAthlete = athlete;
   return athlete;
 };
 
 export const createGuestAthlete = (guestName = 'Atleta Convidado'): AuthenticatedAthlete => {
-  const guestUid = `guest_${Math.random().toString(36).substring(2, 9)}`;
+  const guestUid = `guest_${crypto.randomUUID()}`;
   const athlete: AuthenticatedAthlete = {
     uid: guestUid,
     email: 'convidado@treinomax.app',
     displayName: guestName,
     photoURL: undefined,
     idToken: `mock_token_${guestUid}`,
-    profile: {
-      ...DEFAULT_ATHLETE_PROFILE,
-      name: guestName,
-    },
+    profile: { ...DEFAULT_ATHLETE_PROFILE, name: guestName },
   };
   currentAthlete = athlete;
   currentIdToken = athlete.idToken;
@@ -106,32 +100,29 @@ export const createGuestAthlete = (guestName = 'Atleta Convidado'): Authenticate
 };
 
 export const signInWithGoogle = async (): Promise<AuthenticatedAthlete> => {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    return buildAthleteFromFirebaseUser(result.user);
-  } catch (error: any) {
-    if (error?.code === 'auth/unauthorized-domain') {
-      console.warn('Firebase Auth: Domínio não autorizado no Firebase Console. Utilize o fallback de Atleta Convidado ou Login por E-mail.');
-    }
-    throw error;
-  }
+  const result = await signInWithPopup(auth, googleProvider);
+  return buildAthleteFromFirebaseUser(result.user);
 };
 
 export const signInWithEmailPassword = async (email: string, password: string): Promise<AuthenticatedAthlete> => {
-  try {
-    const userCred = await signInWithEmailAndPassword(auth, email, password);
-    return buildAthleteFromFirebaseUser(userCred.user);
-  } catch (error: any) {
-    if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
-      try {
-        const newUserCred = await createUserWithEmailAndPassword(auth, email, password);
-        return buildAthleteFromFirebaseUser(newUserCred.user);
-      } catch (createErr) {
-        throw createErr;
-      }
-    }
-    throw error;
-  }
+  const userCred = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return buildAthleteFromFirebaseUser(userCred.user);
+};
+
+export const registerWithEmailPassword = async (email: string, password: string): Promise<AuthenticatedAthlete> => {
+  const userCred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  if (!userCred.user.emailVerified) await sendEmailVerification(userCred.user);
+  return buildAthleteFromFirebaseUser(userCred.user);
+};
+
+export const sendCurrentUserEmailVerification = async (): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Nenhum usuário autenticado.');
+  if (!user.emailVerified) await sendEmailVerification(user);
+};
+
+export const sendPasswordReset = async (email: string): Promise<void> => {
+  await sendPasswordResetEmail(auth, email.trim());
 };
 
 export const signOutFromFirebase = async (): Promise<void> => {
@@ -143,10 +134,6 @@ export const signOutFromFirebase = async (): Promise<void> => {
   }
 };
 
-/**
- * Observes both sign-in state and token refreshes. This prevents API calls from
- * continuing to use an expired Firebase ID token after automatic refresh.
- */
 export const subscribeToAuthState = (
   onStateChange: (state: AuthState, athlete: AuthenticatedAthlete | null, error?: Error) => void
 ) => {
@@ -159,7 +146,6 @@ export const subscribeToAuthState = (
         onStateChange('unauthenticated', null);
         return;
       }
-
       try {
         const athlete = await buildAthleteFromFirebaseUser(firebaseUser);
         onStateChange('authenticated', athlete);
