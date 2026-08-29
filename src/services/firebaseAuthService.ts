@@ -21,9 +21,7 @@ const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
 googleProvider.addScope('openid');
-googleProvider.setCustomParameters({
-  prompt: 'select_account',
-});
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 auth.useDeviceLanguage();
 
 export type AuthState = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
@@ -35,6 +33,8 @@ export interface AuthenticatedAthlete {
   photoURL?: string;
   idToken: string;
   emailVerified: boolean;
+  /** Firebase account creation time, preserved across session refreshes. */
+  createdAt?: string;
   profile: UserProfile;
 }
 
@@ -68,6 +68,7 @@ const buildProfileFromFirebaseUser = (user: User): UserProfile => ({
 export const buildAthleteFromFirebaseUser = async (user: User): Promise<AuthenticatedAthlete> => {
   const token = await user.getIdToken();
   currentIdToken = token;
+
   const athlete: AuthenticatedAthlete = {
     uid: user.uid,
     email: user.email || 'atleta@google.com',
@@ -75,8 +76,10 @@ export const buildAthleteFromFirebaseUser = async (user: User): Promise<Authenti
     photoURL: user.photoURL || undefined,
     idToken: token,
     emailVerified: user.emailVerified,
+    createdAt: user.metadata.creationTime || undefined,
     profile: buildProfileFromFirebaseUser(user),
   };
+
   currentAthlete = athlete;
   return athlete;
 };
@@ -90,6 +93,7 @@ export const createGuestAthlete = (guestName = 'Atleta Convidado'): Authenticate
     photoURL: undefined,
     idToken: `mock_token_${guestUid}`,
     emailVerified: false,
+    createdAt: new Date().toISOString(),
     profile: { ...DEFAULT_ATHLETE_PROFILE, name: guestName },
   };
   currentAthlete = athlete;
@@ -131,23 +135,37 @@ export const sendPasswordReset = async (email: string): Promise<void> => {
 };
 
 export const signOutFromFirebase = async (): Promise<void> => {
-  try { await signOut(auth); } finally { currentIdToken = null; currentAthlete = null; }
+  try {
+    await signOut(auth);
+  } finally {
+    currentIdToken = null;
+    currentAthlete = null;
+  }
 };
 
 export const subscribeToAuthState = (
   onStateChange: (state: AuthState, athlete: AuthenticatedAthlete | null, error?: Error) => void
 ) => onIdTokenChanged(auth, async (firebaseUser) => {
   if (!firebaseUser) {
-    currentIdToken = null; currentAthlete = null;
-    onStateChange('unauthenticated', null); return;
+    currentIdToken = null;
+    currentAthlete = null;
+    onStateChange('unauthenticated', null);
+    return;
   }
+
   try {
     onStateChange('authenticated', await buildAthleteFromFirebaseUser(firebaseUser));
   } catch (error: unknown) {
-    currentIdToken = null; currentAthlete = null;
-    onStateChange('error', null, error instanceof Error ? error : new Error('Erro ao obter token do Firebase.'));
+    currentIdToken = null;
+    currentAthlete = null;
+    onStateChange(
+      'error',
+      null,
+      error instanceof Error ? error : new Error('Erro ao obter token do Firebase.')
+    );
   }
 }, (error) => {
-  currentIdToken = null; currentAthlete = null;
+  currentIdToken = null;
+  currentAthlete = null;
   onStateChange('error', null, error);
 });
