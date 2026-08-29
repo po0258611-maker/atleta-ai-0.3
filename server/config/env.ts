@@ -9,9 +9,11 @@ const corsOrigins = (process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split('
   .filter(Boolean);
 
 const paymentMode = process.env.PAYMENT_MODE?.trim() === 'live' ? 'live' : 'mock';
+const configuredPort = Number(process.env.PORT);
+const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 3000;
 
 export const SERVER_CONFIG = {
-  PORT: 3000,
+  PORT: port,
   NODE_ENV,
   CORS_ORIGINS: corsOrigins,
   GEMINI_MODEL: process.env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash',
@@ -27,4 +29,3 @@ export const SERVER_CONFIG = {
   RATE_LIMIT_MAX_REQUESTS: Math.max(1, Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 300),
   MAX_PROMPT_LENGTH: Math.max(100, Number(process.env.MAX_PROMPT_LENGTH) || 4000),
 };
-
