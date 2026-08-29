@@ -18,7 +18,12 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
 const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
+googleProvider.addScope('email');
+googleProvider.addScope('profile');
+googleProvider.addScope('openid');
+googleProvider.setCustomParameters({
+  prompt: 'select_account',
+});
 auth.useDeviceLanguage();
 
 export type AuthState = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
@@ -93,16 +98,8 @@ export const createGuestAthlete = (guestName = 'Atleta Convidado'): Authenticate
 };
 
 export const signInWithGoogle = async (): Promise<AuthenticatedAthlete> => {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    return buildAthleteFromFirebaseUser(result.user);
-  } catch (error: any) {
-    if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
-      console.warn('Firebase Auth: Domínio não autorizado no Firebase Console. Ativando fallback de Atleta Convidado.');
-      return createGuestAthlete('Atleta MAX');
-    }
-    throw error;
-  }
+  const result = await signInWithPopup(auth, googleProvider);
+  return buildAthleteFromFirebaseUser(result.user);
 };
 
 export const signInWithEmailPassword = async (email: string, password: string): Promise<AuthenticatedAthlete> => {

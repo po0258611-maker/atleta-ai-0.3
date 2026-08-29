@@ -7,20 +7,24 @@ import {
   Loader2,
   Lock,
   Sparkles,
-  User as UserIcon,
   Copy,
   Check,
   ChevronDown,
   ChevronUp,
   Mail,
-  Key
+  Key,
+  UserPlus,
+  LogIn
 } from 'lucide-react';
 import { 
   UserAccount, 
   loginWithGoogleAccount,
   loginWithEmailAccount,
-  loginAsGuestAccount 
+  registerWithEmailAccount,
+  resetPassword,
+  convertAthleteToUserAccount
 } from '../services/authService';
+import { createGuestAthlete } from '../services/firebaseAuthService';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: UserAccount) => void;
@@ -29,6 +33,7 @@ interface LoginScreenProps {
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoadingSession }) => {
   const [authMode, setAuthMode] = useState<'google' | 'email'>('google');
+  const [isRegistering, setIsRegistering] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -57,15 +62,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
       setSuccessMessage(`Conectado como ${user.name}!`);
       setTimeout(() => onLoginSuccess(user), 500);
     } catch (err: any) {
-      if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
-        setSuccessMessage('Ambiente de testes: conectando instantaneamente como Atleta Convidado...');
-        const guestUser = loginAsGuestAccount('Atleta MAX');
-        setTimeout(() => onLoginSuccess(guestUser), 400);
-        return;
-      }
       console.warn('Tentativa de login Google Firebase:', err);
       let message = 'Falha ao autenticar com a Conta Google.';
-      if (err.code === 'auth/popup-closed-by-user') {
+      if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
+        message = 'O domínio deste ambiente de testes não está nos Domínios Autorizados do Firebase Console. Adicione o domínio abaixo ou entre com E-mail e Senha.';
+        setShowDomainHelp(true);
+      } else if (err.code === 'auth/popup-closed-by-user') {
         message = 'A janela de login do Google foi fechada antes de concluir.';
       } else if (err.code === 'auth/popup-blocked') {
         message = 'O pop-up de login foi bloqueado pelo seu navegador. Por favor, permita pop-ups.';
@@ -78,42 +80,64 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
     }
   };
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       setErrorMessage('Preencha seu e-mail e senha.');
       return;
     }
 
+    if (password.length < 6) {
+      setErrorMessage('A senha deve ter no mínimo 6 caracteres.');
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
-    setSuccessMessage('Autenticando...');
+    setSuccessMessage(isRegistering ? 'Criando conta de atleta...' : 'Autenticando...');
 
     try {
-      const user = await loginWithEmailAccount(email, password);
-      setSuccessMessage(`Conectado como ${user.name}!`);
+      const user = isRegistering 
+        ? await registerWithEmailAccount(email, password)
+        : await loginWithEmailAccount(email, password);
+      
+      setSuccessMessage(isRegistering ? 'Conta criada com sucesso!' : `Conectado como ${user.name}!`);
       setTimeout(() => onLoginSuccess(user), 500);
     } catch (err: any) {
-      console.error('Erro no login por e-mail:', err);
-      // If Firebase email auth fails or isn't configured, offer seamless guest creation with this email
-      if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/auth-domain-config-required') {
-        const fallbackUser = loginAsGuestAccount(email.split('@')[0] || 'Atleta MAX');
-        setSuccessMessage(`Sessão iniciada como ${fallbackUser.name}!`);
-        setTimeout(() => onLoginSuccess(fallbackUser), 500);
-      } else {
-        setErrorMessage(err.message || 'Falha ao autenticar com e-mail/senha.');
-        setIsSubmitting(false);
-        setSuccessMessage(null);
+      console.error('Erro na autenticação por e-mail:', err);
+      let message = 'Falha ao autenticar.';
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        message = 'E-mail ou senha incorretos.';
+      } else if (err.code === 'auth/email-already-in-use') {
+        message = 'Este e-mail já está cadastrado. Alterne para Entrar.';
+      } else if (err.code === 'auth/weak-password') {
+        message = 'Senha muito fraca. Utilize pelo menos 6 caracteres.';
+      } else if (err.code === 'auth/invalid-email') {
+        message = 'Formato de e-mail inválido.';
+      } else if (err.message) {
+        message = err.message;
       }
+      setErrorMessage(message);
+      setIsSubmitting(false);
+      setSuccessMessage(null);
     }
   };
 
-  const handleGuestLogin = () => {
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    setSuccessMessage('Iniciando sessão em Modo Convidado...');
-    const user = loginAsGuestAccount('Atleta MAX');
-    setTimeout(() => onLoginSuccess(user), 300);
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setErrorMessage('Informe seu e-mail acima para receber o link de redefinição de senha.');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await resetPassword(email);
+      setSuccessMessage(`E-mail de recuperação enviado para ${email}.`);
+      setErrorMessage(null);
+    } catch (err: any) {
+      setErrorMessage('Falha ao enviar e-mail de recuperação. Verifique o e-mail informado.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -145,7 +169,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
           <div className="text-center space-y-1.5">
             <h2 className="text-lg font-bold text-white flex items-center justify-center gap-2">
               <Lock className="w-4 h-4 text-rose-500" />
-              Autenticação Segura
+              Autenticação de Atleta
             </h2>
             <p className="text-xs text-zinc-400">
               Acesse sua conta para sincronizar fichas, cargas e métricas biométricas.
@@ -156,7 +180,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
           <div className="flex bg-zinc-900 p-1 rounded-2xl border border-zinc-800">
             <button
               type="button"
-              onClick={() => setAuthMode('google')}
+              onClick={() => { setAuthMode('google'); setErrorMessage(null); }}
               className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 authMode === 'google' 
                   ? 'bg-rose-600 text-white shadow-md' 
@@ -167,7 +191,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
             </button>
             <button
               type="button"
-              onClick={() => setAuthMode('email')}
+              onClick={() => { setAuthMode('email'); setErrorMessage(null); }}
               className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 authMode === 'email' 
                   ? 'bg-rose-600 text-white shadow-md' 
@@ -221,16 +245,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
               </button>
             </div>
           ) : (
-            <form onSubmit={handleEmailLogin} className="space-y-3">
+            <form onSubmit={handleEmailAuth} className="space-y-3">
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-rose-500" />
-                  E-mail do Atleta
+                  E-mail
                 </label>
                 <input
                   type="email"
                   required
-                  placeholder="atleta@treinomax.app"
+                  placeholder="atleta@exemplo.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-rose-500 transition-colors"
@@ -238,10 +262,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Key className="w-3.5 h-3.5 text-rose-500" />
-                  Senha
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-rose-500" />
+                    Senha
+                  </label>
+                  {!isRegistering && (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-[10px] text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+                    >
+                      Esqueceu a senha?
+                    </button>
+                  )}
+                </div>
                 <input
                   type="password"
                   required
@@ -257,26 +292,72 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
                 disabled={isSubmitting}
                 className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-xl flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-50"
               >
-                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>ENTRAR COM E-MAIL</span>}
+                {isSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : isRegistering ? (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    <span>CRIAR NOVA CONTA</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    <span>ENTRAR</span>
+                  </>
+                )}
               </button>
+
+              <div className="text-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRegistering(!isRegistering);
+                    setErrorMessage(null);
+                  }}
+                  className="text-xs text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+                >
+                  {isRegistering ? 'Já possui conta? Clique para Entrar' : 'Não tem conta? Cadastre-se aqui'}
+                </button>
+              </div>
             </form>
           )}
 
-          {/* Guest / Direct Entry Button */}
-          <div className="space-y-3 pt-2 border-t border-zinc-800/80">
-            <button
-              type="button"
-              disabled={isSubmitting || isLoadingSession}
-              onClick={handleGuestLogin}
-              className="w-full py-3 px-4 bg-zinc-900 hover:bg-zinc-800 text-rose-400 border border-zinc-800 font-bold text-xs sm:text-sm rounded-2xl flex items-center justify-center space-x-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-lg"
-            >
-              <UserIcon className="w-4 h-4 text-rose-500" />
-              <span>ENTRAR COMO ATLETA CONVIDADO (ACESSO RÁPIDO)</span>
-            </button>
-          </div>
-
           {/* Domain Authorization Helper Box */}
-          <div className="pt-2">
+          <div className="pt-2 border-t border-zinc-800/80 space-y-3">
+            {/* Quick Demo Access Button when testing without Firebase domain setup */}
+            <div className="p-3 bg-zinc-900/90 border border-zinc-800 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+                  Acesso Imediato para Testes
+                </span>
+                <span className="text-[10px] text-zinc-500 font-mono">Prévia</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                Quer testar a aplicação agora sem configurar o domínio no Firebase?
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsSubmitting(true);
+                  setErrorMessage(null);
+                  setSuccessMessage('Iniciando sessão de teste imediato...');
+                  try {
+                    const athlete = createGuestAthlete('Atleta Max (Teste)');
+                    const testUser = convertAthleteToUserAccount(athlete);
+                    localStorage.setItem('treinomax_user_session', JSON.stringify(testUser));
+                    setTimeout(() => onLoginSuccess(testUser), 300);
+                  } catch (e) {
+                    setIsSubmitting(false);
+                  }
+                }}
+                className="w-full py-2.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-rose-400 hover:text-rose-300 font-bold text-xs rounded-xl border border-zinc-700/60 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+                <span>ENTRAR COM CONTA DE TESTE / DEMO</span>
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setShowDomainHelp(!showDomainHelp)}
@@ -284,18 +365,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
             >
               <span className="flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-rose-500" />
-                Como autorizar este domínio no Firebase?
+                Como autorizar a Conta Google no Firebase?
               </span>
               {showDomainHelp ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
 
             {showDomainHelp && (
-              <div className="mt-2.5 p-3.5 bg-zinc-900/90 border border-zinc-800 rounded-2xl space-y-3 text-[11px] text-zinc-300 animate-fadeIn">
+              <div className="mt-2 p-3.5 bg-zinc-900/90 border border-zinc-800 rounded-2xl space-y-3 text-[11px] text-zinc-300 animate-fadeIn">
                 <p className="text-zinc-400 leading-relaxed">
-                  Para permitir login pelo popup do Google neste ambiente de testes, adicione a URL atual aos domínios autorizados no Firebase Console:
+                  Para habilitar o popup do Google neste ambiente, autorize este domínio no Firebase Console:
                 </p>
 
-                <div className="flex items-center justify-between gap-2 p-2 bg-black/60 border border-zinc-800 rounded-xl font-mono text-[10px] text-rose-300">
+                <div className="flex items-center justify-between gap-2 p-2.5 bg-black/60 border border-zinc-800 rounded-xl font-mono text-[10px] text-rose-300">
                   <span className="truncate">{currentDomain}</span>
                   <button
                     type="button"
@@ -316,10 +397,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
                   </button>
                 </div>
 
-                <ol className="list-decimal pl-4 space-y-1 text-zinc-400 text-[10px]">
-                  <li>Acesse o <strong>Firebase Console</strong> &gt; Projeto <strong>storied-cable-xn50x</strong>.</li>
-                  <li>Vá em <strong>Authentication</strong> &gt; aba <strong>Settings</strong> &gt; <strong>Authorized Domains</strong>.</li>
-                  <li>Clique em <strong>Add Domain</strong> e cole o endereço copiado acima.</li>
+                <ol className="list-decimal pl-4 space-y-1.5 text-zinc-400 text-[10px]">
+                  <li>Abra o <strong>Firebase Console</strong> no projeto <strong>storied-cable-xn50x</strong>.</li>
+                  <li>Acesse <strong>Authentication</strong> &gt; aba <strong>Settings</strong> &gt; <strong>Authorized Domains</strong>.</li>
+                  <li>Clique em <strong>Add Domain</strong> e cole o domínio copiado acima.</li>
                 </ol>
               </div>
             )}
