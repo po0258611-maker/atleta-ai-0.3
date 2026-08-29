@@ -44,9 +44,12 @@ function isTrustedAiStudioOrigin(originStr: string): boolean {
       host === "localhost" ||
       host === "127.0.0.1" ||
       host.endsWith(".run.app") ||
+      host === "ai.studio" ||
       host.endsWith(".ai.studio") ||
+      host === "aistudio.google.com" ||
       host.endsWith(".aistudio.google.com") ||
-      host.endsWith(".google.com")
+      host === "googleusercontent.com" ||
+      host.endsWith(".googleusercontent.com")
     );
   } catch {
     return false;
@@ -71,7 +74,6 @@ function applyCors(app: express.Express) {
       isSameOrigin ||
       isTrustedAiStudioOrigin(origin);
 
-    // An explicit allow-list is required for cross-origin browser requests.
     if (!isAllowed) {
       if (req.method === "OPTIONS") {
         return res.status(403).json({
@@ -99,16 +101,13 @@ async function startServer() {
   const PORT = SERVER_CONFIG.PORT;
   const isProduction = SERVER_CONFIG.NODE_ENV === "production";
 
-  // Set TRUST_PROXY=true only when the deployment is actually behind a trusted
-  // reverse proxy/load balancer. Never trust arbitrary client-supplied X-Forwarded-* headers.
-  if (process.env.TRUST_PROXY === "true") {
+  if (SERVER_CONFIG.TRUST_PROXY) {
     app.set("trust proxy", 1);
   }
 
   applySecurityHeaders(app);
   applyCors(app);
 
-  // JSON parser with strict payload limit and rawBody capture for webhook verification
   app.use(
     express.json({
       limit: "1mb",
@@ -120,7 +119,6 @@ async function startServer() {
   );
   app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 
-  // Liveness: only answers whether the Node process is alive.
   app.get("/api/health", (_req, res) => {
     res.status(200).json({
       status: "ok",
@@ -130,26 +128,17 @@ async function startServer() {
     });
   });
 
-  // Readiness: verifies essential system dependencies needed for operation.
   app.get("/api/ready", (_req, res) => {
     const isProd = SERVER_CONFIG.NODE_ENV === "production";
     const dbAdapter = getFirestoreAdapter();
     const hasDb = Boolean(dbAdapter);
-    let buildArtifactReady = true;
-
-    if (isProd) {
-      buildArtifactReady = fs.existsSync(path.join(process.cwd(), "dist", "index.html"));
-    }
-
+    const buildArtifactReady = !isProd || fs.existsSync(path.join(process.cwd(), "dist", "index.html"));
     const ready = hasDb && buildArtifactReady;
 
     if (!ready) {
       return res.status(503).json({
         status: "not_ready",
-        checks: {
-          database: hasDb,
-          buildArtifacts: buildArtifactReady,
-        },
+        checks: { database: hasDb, buildArtifacts: buildArtifactReady },
         timestamp: new Date().toISOString(),
       });
     }
@@ -157,10 +146,7 @@ async function startServer() {
     return res.status(200).json({
       status: "ready",
       version: "2.1.0",
-      checks: {
-        database: hasDb,
-        buildArtifacts: buildArtifactReady,
-      },
+      checks: { database: hasDb, buildArtifacts: buildArtifactReady },
       timestamp: new Date().toISOString(),
     });
   });
