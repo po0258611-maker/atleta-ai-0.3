@@ -35,19 +35,27 @@ export function calculateFatigueScore(
     reportedPainSeverity,
   });
 
+  // `consecutiveDays` is a count of distinct training dates, not the number of
+  // log documents. Duplicate/edited logs must not inflate recovery metrics.
+  const distinctTrainingDates = new Set(
+    (recentLogs || [])
+      .map((log) => log?.date)
+      .filter((date): date is string => typeof date === 'string' && date.length > 0)
+  ).size;
+
   return {
     currentFatigueScore: analysis.fatigueScore,
     status: analysis.status,
     volumeAccumulation: analysis.metrics.volumeFactor,
     intensityFactor: analysis.metrics.intensityRpeFactor,
-    consecutiveDays: recentLogs.length,
+    consecutiveDays: distinctTrainingDates,
     sleepFactor: profile.sleepHours,
     recommendedAction: analysis.actionGuidance,
   };
 }
 
 /**
- * Adaptive Progression evaluation (delegates to ProgressionEngine with backward compatibility)
+ * Adaptive Progression evaluation (delegates to ProgressionEngine with backward compatibility).
  */
 export function calculateDoubleProgression(
   exerciseId: string,
@@ -75,7 +83,7 @@ export function calculateDoubleProgression(
     currentWeightKg: decision.currentWeightKg,
     recommendedWeightKg: decision.recommendedWeightKg,
     currentReps: decision.targetRepRange,
-    recommendedReps: decision.recommendedTargetReps,
+    recommendedReps: decision.recommendedTargetRepRange,
     action: decision.action,
     explanation: decision.reason,
   };
