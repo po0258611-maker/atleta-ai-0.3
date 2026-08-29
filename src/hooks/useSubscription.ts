@@ -10,7 +10,6 @@ const FREE_SUBSCRIPTION: SubscriptionState = {
   status: 'canceled',
   billingCycle: 'monthly',
   renewsAt: new Date().toISOString(),
-  paymentMethod: 'none',
   lastPaymentDate: new Date().toISOString(),
 };
 

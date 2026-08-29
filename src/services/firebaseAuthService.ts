@@ -77,10 +77,14 @@ export const buildAthleteFromFirebaseUser = async (user: User): Promise<Authenti
 };
 
 export const createGuestAthlete = (guestName = 'Atleta Convidado'): AuthenticatedAthlete => {
-  const guestUid = `guest_${crypto.randomUUID()}`;
+  const guestUid = `guest_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11)}`;
   const athlete: AuthenticatedAthlete = {
-    uid: guestUid, email: 'convidado@treinomax.app', displayName: guestName,
-    photoURL: undefined, idToken: `mock_token_${guestUid}`, emailVerified: false,
+    uid: guestUid,
+    email: 'convidado@treinomax.app',
+    displayName: guestName,
+    photoURL: undefined,
+    idToken: `mock_token_${guestUid}`,
+    emailVerified: false,
     profile: { ...DEFAULT_ATHLETE_PROFILE, name: guestName },
   };
   currentAthlete = athlete;
@@ -89,8 +93,16 @@ export const createGuestAthlete = (guestName = 'Atleta Convidado'): Authenticate
 };
 
 export const signInWithGoogle = async (): Promise<AuthenticatedAthlete> => {
-  const result = await signInWithPopup(auth, googleProvider);
-  return buildAthleteFromFirebaseUser(result.user);
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return buildAthleteFromFirebaseUser(result.user);
+  } catch (error: any) {
+    if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+      console.warn('Firebase Auth: Domínio não autorizado no Firebase Console. Ativando fallback de Atleta Convidado.');
+      return createGuestAthlete('Atleta MAX');
+    }
+    throw error;
+  }
 };
 
 export const signInWithEmailPassword = async (email: string, password: string): Promise<AuthenticatedAthlete> => {

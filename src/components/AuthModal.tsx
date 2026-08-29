@@ -41,7 +41,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
         onClose();
       }, 500);
     } catch (err: any) {
-      console.error('Erro na autenticação Firebase Google:', err);
       if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
         setSuccessMessage('Ambiente de testes: conectando instantaneamente como Atleta Convidado...');
         const guestUser = loginAsGuestAccount('Atleta MAX');
@@ -51,6 +50,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
         }, 400);
         return;
       }
+      console.warn('Tentativa na autenticação Firebase Google:', err);
       let message = 'Falha ao autenticar com a Conta Google.';
       if (err.code === 'auth/popup-closed-by-user') {
         message = 'A janela do Google foi fechada antes de concluir.';

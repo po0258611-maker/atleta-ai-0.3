@@ -57,14 +57,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
       setSuccessMessage(`Conectado como ${user.name}!`);
       setTimeout(() => onLoginSuccess(user), 500);
     } catch (err: any) {
-      console.error('Falha no login Google Firebase:', err);
       if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
-        // Auto fallback to Guest Account so the preview environment works seamlessly
         setSuccessMessage('Ambiente de testes: conectando instantaneamente como Atleta Convidado...');
         const guestUser = loginAsGuestAccount('Atleta MAX');
         setTimeout(() => onLoginSuccess(guestUser), 400);
         return;
       }
+      console.warn('Tentativa de login Google Firebase:', err);
       let message = 'Falha ao autenticar com a Conta Google.';
       if (err.code === 'auth/popup-closed-by-user') {
         message = 'A janela de login do Google foi fechada antes de concluir.';
