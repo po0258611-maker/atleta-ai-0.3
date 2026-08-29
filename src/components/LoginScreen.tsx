@@ -322,88 +322,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
             </form>
           )}
 
-          {/* Domain Authorization Helper Box */}
-          <div className="pt-2 border-t border-zinc-800/80 space-y-3">
-            {/* Quick Demo Access Button when testing without Firebase domain setup */}
-            <div className="p-3 bg-zinc-900/90 border border-zinc-800 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-zinc-300 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-rose-500" />
-                  Acesso Imediato para Testes
-                </span>
-                <span className="text-[10px] text-zinc-500 font-mono">Prévia</span>
-              </div>
-              <p className="text-[11px] text-zinc-400 leading-relaxed">
-                Quer testar a aplicação agora sem configurar o domínio no Firebase?
-              </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  setIsSubmitting(true);
-                  setErrorMessage(null);
-                  setSuccessMessage('Iniciando sessão de teste imediato...');
-                  try {
-                    const athlete = createGuestAthlete('Atleta Max (Teste)');
-                    const testUser = convertAthleteToUserAccount(athlete);
-                    localStorage.setItem('treinomax_user_session', JSON.stringify(testUser));
-                    setTimeout(() => onLoginSuccess(testUser), 300);
-                  } catch (e) {
-                    setIsSubmitting(false);
-                  }
-                }}
-                className="w-full py-2.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-rose-400 hover:text-rose-300 font-bold text-xs rounded-xl border border-zinc-700/60 flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-                <span>ENTRAR COM CONTA DE TESTE / DEMO</span>
-              </button>
+          {/* Security badge and provider status */}
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-semibold text-emerald-300">Firebase Auth Conectado</span>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setShowDomainHelp(!showDomainHelp)}
-              className="w-full flex items-center justify-between py-2 text-[11px] font-semibold text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-            >
-              <span className="flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-rose-500" />
-                Como autorizar a Conta Google no Firebase?
-              </span>
-              {showDomainHelp ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-
-            {showDomainHelp && (
-              <div className="mt-2 p-3.5 bg-zinc-900/90 border border-zinc-800 rounded-2xl space-y-3 text-[11px] text-zinc-300 animate-fadeIn">
-                <p className="text-zinc-400 leading-relaxed">
-                  Para habilitar o popup do Google neste ambiente, autorize este domínio no Firebase Console:
-                </p>
-
-                <div className="flex items-center justify-between gap-2 p-2.5 bg-black/60 border border-zinc-800 rounded-xl font-mono text-[10px] text-rose-300">
-                  <span className="truncate">{currentDomain}</span>
-                  <button
-                    type="button"
-                    onClick={handleCopyDomain}
-                    className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg transition-colors flex items-center gap-1 flex-shrink-0 cursor-pointer"
-                  >
-                    {copied ? (
-                      <>
-                        <Check className="w-3 h-3 text-emerald-400" />
-                        <span className="text-[10px] text-emerald-400 font-sans">Copiado</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3 h-3 text-zinc-400" />
-                        <span className="text-[10px] font-sans">Copiar</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <ol className="list-decimal pl-4 space-y-1.5 text-zinc-400 text-[10px]">
-                  <li>Abra o <strong>Firebase Console</strong> no projeto <strong>storied-cable-xn50x</strong>.</li>
-                  <li>Acesse <strong>Authentication</strong> &gt; aba <strong>Settings</strong> &gt; <strong>Authorized Domains</strong>.</li>
-                  <li>Clique em <strong>Add Domain</strong> e cole o domínio copiado acima.</li>
-                </ol>
-              </div>
-            )}
+            <span className="text-[10px] font-mono text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+              Google & E-mail Ativos
+            </span>
           </div>
         </div>
 
