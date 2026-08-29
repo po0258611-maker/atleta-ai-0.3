@@ -29,25 +29,16 @@ export interface AuthenticatedAthlete {
   displayName: string;
   photoURL?: string;
   idToken: string;
+  emailVerified: boolean;
   profile: UserProfile;
 }
 
 const DEFAULT_ATHLETE_PROFILE: UserProfile = {
-  name: 'Atleta',
-  gender: 'male',
-  age: 26,
-  heightCm: 175,
-  weightKg: 75,
-  experience: 'intermediate',
-  availableDays: 4,
-  timePerSessionMin: 60,
-  objective: 'hypertrophy',
-  environment: 'full_gym',
-  priorities: ['peitoral', 'costas', 'quadriceps'],
-  limitations: [],
-  forbiddenExercises: [],
-  sleepHours: 8,
-  stressLevel: 'moderate',
+  name: 'Atleta', gender: 'male', age: 26, heightCm: 175, weightKg: 75,
+  experience: 'intermediate', availableDays: 4, timePerSessionMin: 60,
+  objective: 'hypertrophy', environment: 'full_gym',
+  priorities: ['peitoral', 'costas', 'quadriceps'], limitations: [],
+  forbiddenExercises: [], sleepHours: 8, stressLevel: 'moderate',
 };
 
 let currentIdToken: string | null = null;
@@ -78,6 +69,7 @@ export const buildAthleteFromFirebaseUser = async (user: User): Promise<Authenti
     displayName: user.displayName || 'Atleta Google',
     photoURL: user.photoURL || undefined,
     idToken: token,
+    emailVerified: user.emailVerified,
     profile: buildProfileFromFirebaseUser(user),
   };
   currentAthlete = athlete;
@@ -87,11 +79,8 @@ export const buildAthleteFromFirebaseUser = async (user: User): Promise<Authenti
 export const createGuestAthlete = (guestName = 'Atleta Convidado'): AuthenticatedAthlete => {
   const guestUid = `guest_${crypto.randomUUID()}`;
   const athlete: AuthenticatedAthlete = {
-    uid: guestUid,
-    email: 'convidado@treinomax.app',
-    displayName: guestName,
-    photoURL: undefined,
-    idToken: `mock_token_${guestUid}`,
+    uid: guestUid, email: 'convidado@treinomax.app', displayName: guestName,
+    photoURL: undefined, idToken: `mock_token_${guestUid}`, emailVerified: false,
     profile: { ...DEFAULT_ATHLETE_PROFILE, name: guestName },
   };
   currentAthlete = athlete;
@@ -121,45 +110,35 @@ export const sendCurrentUserEmailVerification = async (): Promise<void> => {
   if (!user.emailVerified) await sendEmailVerification(user);
 };
 
+export const refreshCurrentUser = async (): Promise<AuthenticatedAthlete | null> => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  await user.reload();
+  return buildAthleteFromFirebaseUser(user);
+};
+
 export const sendPasswordReset = async (email: string): Promise<void> => {
   await sendPasswordResetEmail(auth, email.trim());
 };
 
 export const signOutFromFirebase = async (): Promise<void> => {
-  try {
-    await signOut(auth);
-  } finally {
-    currentIdToken = null;
-    currentAthlete = null;
-  }
+  try { await signOut(auth); } finally { currentIdToken = null; currentAthlete = null; }
 };
 
 export const subscribeToAuthState = (
   onStateChange: (state: AuthState, athlete: AuthenticatedAthlete | null, error?: Error) => void
-) => {
-  return onIdTokenChanged(
-    auth,
-    async (firebaseUser) => {
-      if (!firebaseUser) {
-        currentIdToken = null;
-        currentAthlete = null;
-        onStateChange('unauthenticated', null);
-        return;
-      }
-      try {
-        const athlete = await buildAthleteFromFirebaseUser(firebaseUser);
-        onStateChange('authenticated', athlete);
-      } catch (error: unknown) {
-        currentIdToken = null;
-        currentAthlete = null;
-        const normalized = error instanceof Error ? error : new Error('Erro ao obter token do Firebase.');
-        onStateChange('error', null, normalized);
-      }
-    },
-    (error) => {
-      currentIdToken = null;
-      currentAthlete = null;
-      onStateChange('error', null, error);
-    }
-  );
-};
+) => onIdTokenChanged(auth, async (firebaseUser) => {
+  if (!firebaseUser) {
+    currentIdToken = null; currentAthlete = null;
+    onStateChange('unauthenticated', null); return;
+  }
+  try {
+    onStateChange('authenticated', await buildAthleteFromFirebaseUser(firebaseUser));
+  } catch (error: unknown) {
+    currentIdToken = null; currentAthlete = null;
+    onStateChange('error', null, error instanceof Error ? error : new Error('Erro ao obter token do Firebase.'));
+  }
+}, (error) => {
+  currentIdToken = null; currentAthlete = null;
+  onStateChange('error', null, error);
+});
