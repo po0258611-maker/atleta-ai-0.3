@@ -11,7 +11,7 @@ import {
 import { UserProfile } from '../types';
 import { FirestoreDataService } from '../services/firestoreDataService';
 import { migrateLocalStorageToFirestore } from '../services/dataMigrationService';
-import { refreshCurrentUser } from '../services/firebaseAuthService';
+import { refreshCurrentUser, resolveGoogleRedirect } from '../services/firebaseAuthService';
 
 export function useAuth() {
   const [authState, setAuthState] = useState<AuthState>('loading');
@@ -19,7 +19,10 @@ export function useAuth() {
   const [emailVerifySuccess, setEmailVerifySuccess] = useState(false);
 
   useEffect(() => {
+    let active = true;
+
     const unsubscribe = subscribeToAuthState(async (state, athlete) => {
+      if (!active) return;
       setAuthState(state);
       if (state === 'authenticated' && athlete) {
         setCurrentUser(convertAthleteToUserAccount(athlete));
@@ -30,7 +33,29 @@ export function useAuth() {
         setCurrentUser(null);
       }
     });
-    return () => unsubscribe();
+
+    // Finaliza um login Google iniciado por redirect. Em um carregamento
+    // normal não existe resultado pendente e a função retorna null.
+    void resolveGoogleRedirect()
+      .then((athlete) => {
+        if (!active || !athlete) return;
+        setAuthState('authenticated');
+        setCurrentUser(convertAthleteToUserAccount(athlete));
+        setEmailVerifySuccess(false);
+        migrateLocalStorageToFirestore(athlete.uid).catch((err) =>
+          console.warn('Erro durante migração para Firestore:', err)
+        );
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error('Erro ao finalizar login Google por redirect:', err);
+        setAuthState('error');
+      });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   const handleLoginSuccess = (account: UserAccount) => setCurrentUser(account);
