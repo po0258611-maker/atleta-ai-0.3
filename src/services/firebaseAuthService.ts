@@ -10,6 +10,10 @@ import {
   onIdTokenChanged,
   User,
   signOut,
+  getRedirectResult,
+  signInWithRedirect,
+  browserLocalPersistence,
+  setPersistence,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { UserProfile } from '../types';
@@ -23,6 +27,13 @@ googleProvider.addScope('profile');
 googleProvider.addScope('openid');
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 auth.useDeviceLanguage();
+
+// Keep the browser session stable across reloads and AI Studio Preview refreshes.
+// This does not change Firebase project credentials or payment configuration.
+void setPersistence(auth, browserLocalPersistence).catch(() => {
+  // Some embedded/preview browsers can reject persistence. Firebase Auth can
+  // still operate for the current session, so do not block application startup.
+});
 
 export type AuthState = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
@@ -101,8 +112,39 @@ export const createGuestAthlete = (guestName = 'Atleta Convidado'): Authenticate
   return athlete;
 };
 
+/**
+ * Starts Google authentication using a popup first. If the browser/Preview
+ * blocks popups, use Firebase's redirect flow instead of leaving the user
+ * with an opaque failure. Unauthorized-domain is deliberately re-thrown:
+ * only Firebase project configuration can authorize a domain.
+ */
 export const signInWithGoogle = async (): Promise<AuthenticatedAthlete> => {
-  const result = await signInWithPopup(auth, googleProvider);
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return buildAthleteFromFirebaseUser(result.user);
+  } catch (error: unknown) {
+    const code = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : '';
+
+    if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user') {
+      await signInWithRedirect(auth, googleProvider);
+      // The redirect leaves the current page. This rejection is only a
+      // defensive fallback for unusual browsers that do not navigate.
+      throw new Error('REDIRECT_AUTH_STARTED');
+    }
+
+    throw error;
+  }
+};
+
+/**
+ * Completes a Google redirect login, if Firebase has a pending result.
+ * Safe to call on every application startup; returns null when none exists.
+ */
+export const resolveGoogleRedirect = async (): Promise<AuthenticatedAthlete | null> => {
+  const result = await getRedirectResult(auth);
+  if (!result?.user) return null;
   return buildAthleteFromFirebaseUser(result.user);
 };
 
