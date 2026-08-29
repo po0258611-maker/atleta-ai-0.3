@@ -42,10 +42,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
       }, 500);
     } catch (err: any) {
       console.error('Erro na autenticação Firebase Google:', err);
-      let message = 'Falha ao autenticar com a Conta Google.';
       if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
-        message = 'O domínio deste ambiente de testes não está cadastrado nos Domínios Autorizados do Firebase Console. Use a opção Convidado abaixo.';
-      } else if (err.code === 'auth/popup-closed-by-user') {
+        setSuccessMessage('Ambiente de testes: conectando instantaneamente como Atleta Convidado...');
+        const guestUser = loginAsGuestAccount('Atleta MAX');
+        setTimeout(() => {
+          onLoginSuccess(guestUser);
+          onClose();
+        }, 400);
+        return;
+      }
+      let message = 'Falha ao autenticar com a Conta Google.';
+      if (err.code === 'auth/popup-closed-by-user') {
         message = 'A janela do Google foi fechada antes de concluir.';
       } else if (err.code === 'auth/popup-blocked') {
         message = 'O pop-up de login foi bloqueado pelo seu navegador.';

@@ -58,11 +58,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
       setTimeout(() => onLoginSuccess(user), 500);
     } catch (err: any) {
       console.error('Falha no login Google Firebase:', err);
-      let message = 'Falha ao autenticar com a Conta Google.';
       if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
-        message = 'O domínio deste ambiente de testes não está nos Domínios Autorizados do Firebase Console.';
-        setShowDomainHelp(true);
-      } else if (err.code === 'auth/popup-closed-by-user') {
+        // Auto fallback to Guest Account so the preview environment works seamlessly
+        setSuccessMessage('Ambiente de testes: conectando instantaneamente como Atleta Convidado...');
+        const guestUser = loginAsGuestAccount('Atleta MAX');
+        setTimeout(() => onLoginSuccess(guestUser), 400);
+        return;
+      }
+      let message = 'Falha ao autenticar com a Conta Google.';
+      if (err.code === 'auth/popup-closed-by-user') {
         message = 'A janela de login do Google foi fechada antes de concluir.';
       } else if (err.code === 'auth/popup-blocked') {
         message = 'O pop-up de login foi bloqueado pelo seu navegador. Por favor, permita pop-ups.';
@@ -177,19 +181,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isLoad
 
           {/* Feedback Messages */}
           {errorMessage && (
-            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex flex-col space-y-2.5 text-xs text-rose-300">
-              <div className="flex items-start space-x-2.5">
-                <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0 mt-0.5" />
-                <span>{errorMessage}</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleGuestLogin}
-                className="w-full py-2.5 px-3 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-200 font-bold rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-                <span>Entrar Instantaneamente como Atleta Convidado</span>
-              </button>
+            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center space-x-2.5 text-xs text-rose-300">
+              <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0" />
+              <span>{errorMessage}</span>
             </div>
           )}
 
