@@ -1,6 +1,7 @@
-import { UserProfile, FullBodyProgram, Exercise } from '../types';
+import { UserProfile, FullBodyProgram, Exercise, WorkoutLog, AthleteContext } from '../types';
 import { postApi } from '../api/apiClient';
 import { EXERCISE_DATABASE } from './exerciseData';
+import { AthleteContextService } from '../services/athleteContextService';
 
 export interface AICoachMessage {
   id: string;
@@ -95,48 +96,19 @@ function shouldFailClosed(error: unknown): boolean {
 export async function askAICoach(
   prompt: string,
   userProfile?: UserProfile | null,
-  activeProgram?: FullBodyProgram | null
+  activeProgram?: FullBodyProgram | null,
+  workoutLogs: WorkoutLog[] = []
 ): Promise<string> {
   try {
-    const validatedData: Record<string, unknown> = {};
-
-    if (userProfile) {
-      validatedData.atleta = {
-        nome: userProfile.name,
-        objetivo: userProfile.objective,
-        experiencia: userProfile.experience,
-        diasDisponiveis: userProfile.availableDays,
-        pesoKg: userProfile.weightKg,
-        alturaCm: userProfile.heightCm,
-        limitacoesFisicas: userProfile.limitations || [],
-        exerciciosProibidos: userProfile.forbiddenExercises || [],
-      };
-    }
-
-    if (activeProgram) {
-      validatedData.programaPeriodizado = {
-        id: activeProgram.id,
-        metodologia: activeProgram.methodology,
-        diasTotais: activeProgram.splitDays.length,
-        distribuicao: activeProgram.splitDays.map((d) => ({
-          dia: d.id,
-          titulo: d.title,
-          foco: d.focusMuscles,
-          tempoMin: d.estimatedTimeMin,
-          exerciciosPrescritos: d.items.map((i) => ({
-            exercicio: i.exercise.nome,
-            series: i.targetSets,
-            reps: i.targetReps,
-            rir: i.targetRIR,
-          })),
-        })),
-        volumeSemanalPorGrupo: activeProgram.weeklyVolumeMap,
-      };
-    }
+    const athleteContext = AthleteContextService.buildAthleteContext(
+      userProfile,
+      activeProgram,
+      workoutLogs
+    );
 
     const data = await postApi<{ reply: string }>('/api/ai-coach', {
       prompt,
-      context: Object.keys(validatedData).length > 0 ? validatedData : undefined,
+      context: athleteContext ? (athleteContext as unknown as Record<string, unknown>) : undefined,
     });
 
     if (!data?.reply) {

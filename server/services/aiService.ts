@@ -54,8 +54,79 @@ export function generateDeterministicCoachAnswer(
   const nomeAtleta = atleta.nome || 'Atleta';
   const objetivo = atleta.objetivo || 'hypertrophy';
   const exp = (atleta.experiencia || 'intermediate').toUpperCase();
+  const fadiga = (context?.fadigaERecuperacao as Record<string, any>) || null;
+  const metas = (context?.metasEComposicaoCorporal as Record<string, any>) || null;
+  const progressao = (context?.progressaoEHistoricoRecente as Record<string, any>) || null;
+  const programa = (context?.programaPeriodizado as Record<string, any>) || null;
 
-  // 1. DIETA FLEXÍVEL & MACRONUTRIENTES / PERDA DE GORDURA
+  // 1. FADIGA, RECUPERAÇÃO E DELOAD
+  if (
+    norm.includes('deload') ||
+    norm.includes('fadiga') ||
+    norm.includes('dor') ||
+    norm.includes('recuperacao') ||
+    norm.includes('cansado') ||
+    norm.includes('sobretreino')
+  ) {
+    const score = fadiga?.scoreFadiga ?? 35;
+    const status = fadiga?.status || 'optimal';
+    const acao = fadiga?.orientacaoAcao || 'Manter o planejamento atual de treino.';
+    const drivers = Array.isArray(fadiga?.driversPrincipais) && fadiga.driversPrincipais.length > 0
+      ? fadiga.driversPrincipais.join(', ')
+      : 'Nenhum driver crítico de sobrecarga';
+
+    return `### Avaliação de Fadiga & Gestão de Recuperação (KINETIX Diagnostics)
+
+Olá, **${nomeAtleta}**! Analisamos seus dados biométricos e histórico recente de esforço:
+
+- **Índice de Fadiga Multifatorial:** **${score}/100** (Status: **${status.toUpperCase()}**)
+- **Fatores Primários:** ${drivers}
+- **Conduta Recomendada:** ${acao}
+
+${status === 'deload_recommended' || status === 'high_fatigue'
+  ? `> **Protocolo de Deload Prescrito:**
+> 1. Reduza o volume de trabalho em **40% a 50%** (2 séries por exercício).
+> 2. Mantenha as cargas estáveis, mas aumente o RIR para **3 a 4** (RPE 6-7).
+> 3. Priorize 8h+ de sono e mantenha a ingestão proteica em 2.0g/kg para restauração neural e miotendínea.`
+  : `> **Status de Prontidão:** Seus marcadores indicam boa capacidade de assimilação de sobrecarga progressiva. Mantenha RIR 1-2 nas séries efetivas e monitore a qualidade do sono.`}`;
+  }
+
+  // 2. PROGRESSÃO DE CARGA, SOBRECARGA E 1RM
+  if (
+    norm.includes('progressao') ||
+    norm.includes('progredir') ||
+    norm.includes('sobrecarga') ||
+    norm.includes('aumentar carga') ||
+    norm.includes('carga') ||
+    norm.includes('1rm') ||
+    norm.includes('double progression') ||
+    norm.includes('peso do exercicio')
+  ) {
+    const rm = progressao?.estimativa1RM || {};
+    const sq = rm.agachamento ? `${rm.agachamento} kg` : 'N/A';
+    const bp = rm.supino ? `${rm.supino} kg` : 'N/A';
+    const dl = rm.terra ? `${rm.terra} kg` : 'N/A';
+    const ohp = rm.desenvolvimento ? `${rm.desenvolvimento} kg` : 'N/A';
+
+    return `### Motor de Sobrecarga Adaptativa (Double Progression)
+
+Olá, **${nomeAtleta}**! No nível **${exp}**, a sobrecarga deve ser estritamente quantificada e metódica:
+
+### 1. Regra de Execução da Double Progression
+1. **Fixe a Faixa de Repetições:** Por exemplo, 8 a 12 repetições.
+2. **Progrida em Repetições Primeiro:** Mantenha a mesma carga e adicione repetições em cada sessão até conseguir completar o topo da faixa (ex: 3x12) com forma biomecânica impecável e RIR 1-2.
+3. **Incremente a Carga:** Suba **2% a 5%** no peso (ex: +2kg a +4kg na barra ou halteres) e retorne à base da faixa (8 reps), reiniciando o ciclo de acúmulo.
+
+### 2. Estimativas Recentes de 1RM do Atleta
+- **Agachamento:** ${sq}
+- **Supino Reto:** ${bp}
+- **Levantamento Terra:** ${dl}
+- **Desenvolvimento Militar:** ${ohp}
+
+> **Diretriz de Segurança:** Nunca force progressão de carga se a cadência excêntrica (2-3s) ou a amplitude ativa forem comprometidas.`;
+  }
+
+  // 3. DIETA FLEXÍVEL & MACRONUTRIENTES / METAS CORPORAIS
   if (
     norm.includes('dieta') ||
     norm.includes('macro') ||
@@ -63,39 +134,67 @@ export function generateDeterministicCoachAnswer(
     norm.includes('cutting') ||
     norm.includes('caloria') ||
     norm.includes('perder peso') ||
-    norm.includes('emagrecer')
+    norm.includes('emagrecer') ||
+    norm.includes('bulking')
   ) {
-    return `Olá, **${nomeAtleta}**! Aqui está a estratégia científica padrão-ouro para a organização dos macronutrientes na **Dieta Flexível (NutriFlux)** voltada para a perda de gordura com máxima preservação de massa muscular:
+    const cals = metas?.caloriasDiariasRecomendadas || Math.round((atleta.pesoKg || 75) * 30);
+    const pG = metas?.macrosG?.proteinas || Math.round((atleta.pesoKg || 75) * 2.2);
+    const cG = metas?.macrosG?.carboidratos || Math.round((atleta.pesoKg || 75) * 3.5);
+    const fG = metas?.macrosG?.gorduras || Math.round((atleta.pesoKg || 75) * 0.8);
+    const metaPeso = metas?.metaPesoKg || atleta.pesoKg || 75;
 
-### 1. Balanço Calórico (O Fator Primário)
-* **Déficit Calórico Moderado:** Calcule seu Gasto Energético Total (GET / TDEE) e aplique um déficit de **15% a 20% (300 a 500 kcal/dia)**. Déficits mais agressivos elevam a perda de massa magra e os níveis de cortisol.
+    return `Olá, **${nomeAtleta}**! Aqui está o planejamento nutricional científico calculado para seu objetivo de **${objetivo.toUpperCase()}**:
+
+### 1. Alvos Calóricos & Composição Corporal
+- **Gasto Calórico / Meta Diária:** **${cals} kcal/dia**
+- **Meta de Peso Corporal:** **${metaPeso} kg** (${metas?.semanasEstimadas ? `Previsão: ~${metas.semanasEstimadas} semanas` : 'Médio prazo'})
 
 ### 2. Distribuição Precisa de Macronutrientes
-* **Proteínas (2.0 a 2.4g/kg de peso corporal):**
-  * *Função:* Máxima preservação miofibrilar sob restrição calórica e alto poder de saciedade.
-  * *Fontes:* Frango, ovos, peito de peru, carnes magras, peixes, whey protein, tofu, iogurte grego.
-* **Gorduras (0.7 a 0.9g/kg de peso corporal):**
-  * *Função:* Suporte à produção de hormônios esteróides (testosterona) e absorção de vitaminas lipossolúveis (A, D, E, K). Nunca reduza para menos de 0.6g/kg.
-  * *Fontes:* Azeite de oliva extravirgem, ovos inteiros, abacate, castanhas e pasta de amendoim.
-* **Carboidratos (Calorias Restantes):**
-  * *Função:* Combustível primário para glicogênio muscular e manutenção do rendimento no treino resistido pesado.
-  * *Cálculo:* (Calorias Totais da Meta - [Proteínas × 4] - [Gorduras × 9]) ÷ 4 = **gramas de carboidrato por dia**.
+- **Proteínas:** **${pG}g/dia** (~${Math.round((pG * 4 * 100) / cals)}% das calorias) — Máxima síntese proteica miofibrilar e saciedade.
+- **Carboidratos:** **${cG}g/dia** (~${Math.round((cG * 4 * 100) / cals)}% das calorias) — Suporte a glicogênio intramuscular e rendimento sob alta intensidade.
+- **Gorduras:** **${fG}g/dia** (~${Math.round((fG * 9 * 100) / cals)}% das calorias) — Homeostase hormonal e absorção de micronutrientes.
 
 ### 3. Fibras e Hidratação Estratégica
-* **Fibras:** **14g a cada 1.000 kcal** ingeridas (aveia, vegetais folhosos, frutas com casca, feijão) para saúde intestinal e controle glicêmico.
-* **Água:** **40 a 50 ml/kg/dia** para transporte de nutrientes e síntese proteica celular.
+- **Fibras:** **14g por 1.000 kcal** (~${Math.round((cals / 1000) * 14)}g/dia) de fontes integrais.
+- **Água:** **40 a 50 ml/kg/dia** (~${Math.round((atleta.pesoKg || 75) * 0.045 * 10) / 10} L/dia).
 
-> **Regra 80/20:** Obtenha 80% das suas calorias de alimentos integrais e densos em micronutrientes, reservando até 20% para flexibilidade de alimentos de preferência pessoal sem estourar as metas de macros.`;
+> **Aderência Flexível (Regra 80/20):** 80% de alimentos limpos e densos em micronutrientes, reservando até 20% para flexibilidade de alimentos preferidos dentro dos limites de macronutrientes.`;
   }
 
-  // 2. HIPERTROFIA NATURAL & VOLUME DE TREINO
+  // 4. PROGRAMA DE TREINO & DIVISÃO ATIVA
+  if (
+    norm.includes('programa') ||
+    norm.includes('divisao') ||
+    norm.includes('meu treino') ||
+    norm.includes('rotina') ||
+    norm.includes('split')
+  ) {
+    const totalDias = programa?.diasTotais || atleta.diasDisponiveis || 3;
+    const splitInfo = Array.isArray(programa?.distribuicao)
+      ? programa.distribuicao.map((d: any) => `* **Dia ${d.dia} (${d.titulo}):** ${d.foco?.join(', ') || 'Full Body'} (~${d.tempoMin} min)`).join('\n')
+      : `* Matriz Full Body distribuída em ${totalDias} sessões semanais`;
+
+    return `### Arquitetura do Programa de Treino Ativo
+
+Olá, **${nomeAtleta}**! Seu programa está estruturado sob a metodologia **Full Body High-Frequency**:
+
+- **Frequência:** ${totalDias} dias por semana
+- **Ambiente:** ${atleta.ambiente === 'full_gym' ? 'Academia Completa' : atleta.ambiente === 'small_gym' ? 'Academia de Condomínio' : 'Home Gym / Peso Corporal'}
+- **Tempo por Sessão:** ~${atleta.tempoPorSessaoMin || 60} minutos
+
+### Estrutura de Divisão:
+${splitInfo}
+
+> **Diretriz de Volume:** O volume semanal foi distribuído para atingir o MAV (Maximum Adaptive Volume) de cada grupo muscular, mantendo descanso fisiológico mínimo de 48h entre estímulos diretos nos mesmos grupos motores.`;
+  }
+
+  // 5. HIPERTROFIA NATURAL & VOLUME DE TREINO
   if (
     norm.includes('hipertrofia') ||
     norm.includes('ganho de massa') ||
     norm.includes('natural') ||
     norm.includes('series') ||
-    norm.includes('volume') ||
-    norm.includes('split')
+    norm.includes('volume')
   ) {
     return `Olá, **${nomeAtleta}**! No seu nível **${exp}**, a hipertrofia natural máxima depende de 3 pilares biomecânicos e fisiológicos fundamentais:
 
@@ -113,7 +212,7 @@ export function generateDeterministicCoachAnswer(
 3. Suba a carga em **2% a 5%** (ex: +2kg a +4kg totais) e reinicie a progressão em 8 reps.`;
   }
 
-  // 3. SUPLEMENTAÇÃO CIENTÍFICA
+  // 6. SUPLEMENTAÇÃO CIENTÍFICA
   if (
     norm.includes('suplement') ||
     norm.includes('creatina') ||
@@ -139,12 +238,10 @@ export function generateDeterministicCoachAnswer(
 > **O que descartar:** Queimadores de gordura milagrosos, pré-treinos superdosados de estimulantes sem base científica e BCAA isolado (se sua ingestão proteica total já for adequada).`;
   }
 
-  // 4. SONO, RECUPERAÇÃO E SÍNTESE PROTEICA
+  // 7. SONO, RECUPERAÇÃO E SÍNTESE PROTEICA
   if (
     norm.includes('sono') ||
-    norm.includes('recupera') ||
     norm.includes('sintese') ||
-    norm.includes('fadiga') ||
     norm.includes('descanso')
   ) {
     return `### Sono & Recuperação Sistêmica (Otimização da Síntese Proteica)
@@ -160,7 +257,7 @@ export function generateDeterministicCoachAnswer(
    * Fracione sua ingestão de proteína em **3 a 5 refeições espaçadas a cada 3-4 horas**, com pelo menos 0.4g/kg por refeição, mantendo a sinalização da via mTOR constantemente renovada.`;
   }
 
-  // 5. RESPOSTA BIOMECÂNICA PADRÃO PERSONALIZADA
+  // 8. RESPOSTA BIOMECÂNICA PADRÃO PERSONALIZADA
   return `Olá, **${nomeAtleta}**! Sou o **KINETIX Coach AI™**, integrado ao motor de prescrição do Treino MAX.
 
 Em relação à sua dúvida:
