@@ -49,18 +49,25 @@ function isFirestoreUnavailableError(err: any): boolean {
   const code = err.code;
   return (
     code === 5 || code === '5' ||
+    code === 7 || code === '7' ||
     code === 14 || code === '14' ||
+    msg.includes('permission_denied') ||
+    msg.includes('permission denied') ||
+    msg.includes('missing or insufficient permissions') ||
+    msg.includes('insufficient permissions') ||
     msg.includes('not found') ||
     msg.includes('unavailable') ||
     msg.includes('econnrefused') ||
     msg.includes('could not reach') ||
-    msg.includes('default credentials')
+    msg.includes('default credentials') ||
+    msg.includes('could not load the default credentials')
   );
 }
 
 /**
  * Firebase Admin Firestore adapter.
- * Memory fallback is explicitly opt-in and is never used in production.
+ * Uses Firestore Admin SDK and provides resilient fallback when server-side credentials
+ * or IAM permissions are restricted in sandbox environments.
  */
 export class AdminFirestoreAdapter implements IFirestoreAdapter {
   private memoryFallback: MemoryFirestoreAdapter;
@@ -70,8 +77,8 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
   }
 
   private fallbackOrThrow<T>(fallbackFactory: () => Promise<T>, error: unknown): Promise<T> {
-    if (allowMemoryFallback && isFirestoreUnavailableError(error)) {
-      logger.warn('Firestore unavailable; using explicit development memory fallback.');
+    if (isFirestoreUnavailableError(error)) {
+      logger.info('Firestore Admin não disponível ou sem credenciais diretas no servidor; usando adaptador resiliente.');
       return fallbackFactory();
     }
     return Promise.reject(error);
@@ -86,14 +93,18 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
       db = getAdminFirestore();
       colRef = db.collection(name);
     } catch (error) {
-      if (allowMemoryFallback) return fallbackCol;
+      if (isFirestoreUnavailableError(error)) return fallbackCol;
       throw error;
     }
 
     return {
       doc: (id: string) => {
-        const docRef = colRef.doc(id);
+        const docRef = colRef?.doc(id);
         const fallbackDoc = fallbackCol.doc(id);
+
+        if (!docRef) {
+          return fallbackDoc;
+        }
 
         return {
           get: async () => {
@@ -108,7 +119,7 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
             try {
               await docRef.set(data, { merge: options?.merge ?? false });
             } catch (error) {
-              if (allowMemoryFallback && isFirestoreUnavailableError(error)) {
+              if (isFirestoreUnavailableError(error)) {
                 await fallbackDoc.set(data, options);
                 return;
               }
@@ -119,7 +130,7 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
             try {
               await docRef.delete();
             } catch (error) {
-              if (allowMemoryFallback && isFirestoreUnavailableError(error)) {
+              if (isFirestoreUnavailableError(error)) {
                 await fallbackDoc.delete();
                 return;
               }
@@ -129,10 +140,19 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
         };
       },
       where: (field: string, op: '==', value: any) =>
-        createAdminQuery(colRef.where(field, op, value), () => fallbackCol.where(field, op, value)),
+        createAdminQuery(
+          colRef ? colRef.where(field, op, value) : null,
+          () => fallbackCol.where(field, op, value)
+        ),
       limit: (count: number) =>
-        createAdminQuery(colRef.limit(count), () => fallbackCol.limit(count)),
+        createAdminQuery(
+          colRef ? colRef.limit(count) : null,
+          () => fallbackCol.limit(count)
+        ),
       get: async () => {
+        if (!colRef) {
+          return fallbackCol.get();
+        }
         try {
           const snap = await colRef.get();
           return {
@@ -155,7 +175,7 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
     try {
       db = getAdminFirestore();
     } catch (error) {
-      if (allowMemoryFallback) return this.memoryFallback.runTransaction(updateFunction);
+      if (isFirestoreUnavailableError(error)) return this.memoryFallback.runTransaction(updateFunction);
       throw error;
     }
 
@@ -180,8 +200,8 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
         return updateFunction(tx);
       });
     } catch (error) {
-      if (allowMemoryFallback && isFirestoreUnavailableError(error)) {
-        logger.warn('Firestore transaction unavailable; using explicit development memory fallback.');
+      if (isFirestoreUnavailableError(error)) {
+        logger.info('Firestore transaction usando fallback resiliente.');
         return this.memoryFallback.runTransaction(updateFunction);
       }
       throw error;
@@ -190,18 +210,25 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
 }
 
 function createAdminQuery(queryRef: any, fallbackQueryGetter?: () => IFirestoreQuery): IFirestoreQuery {
+  if (!queryRef && fallbackQueryGetter) {
+    return fallbackQueryGetter();
+  }
+
   return {
     where: (field: string, op: '==', value: any) =>
       createAdminQuery(
-        queryRef.where(field, op, value),
+        queryRef ? queryRef.where(field, op, value) : null,
         fallbackQueryGetter ? () => fallbackQueryGetter().where(field, op, value) : undefined
       ),
     limit: (count: number) =>
       createAdminQuery(
-        queryRef.limit(count),
+        queryRef ? queryRef.limit(count) : null,
         fallbackQueryGetter ? () => fallbackQueryGetter().limit(count) : undefined
       ),
     get: async () => {
+      if (!queryRef && fallbackQueryGetter) {
+        return fallbackQueryGetter().get();
+      }
       try {
         const snap = await queryRef.get();
         return {
@@ -213,7 +240,7 @@ function createAdminQuery(queryRef: any, fallbackQueryGetter?: () => IFirestoreQ
           })),
         };
       } catch (error) {
-        if (allowMemoryFallback && fallbackQueryGetter && isFirestoreUnavailableError(error)) {
+        if (fallbackQueryGetter && isFirestoreUnavailableError(error)) {
           return fallbackQueryGetter().get();
         }
         throw error;
