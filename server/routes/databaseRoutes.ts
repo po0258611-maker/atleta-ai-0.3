@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { SERVER_CONFIG } from '../config/env';
 
 export const databaseRouter = Router();
 
@@ -43,7 +44,7 @@ databaseRouter.get('/status', async (_req: Request, res: Response) => {
         firestore: {
           name: 'Firebase Firestore & Auth',
           connected: true,
-          projectId: process.env.FIREBASE_PROJECT_ID || 'storied-cable-xn50x',
+          projectId: SERVER_CONFIG.FIREBASE_PROJECT_ID,
           status: 'online',
           latencyMs: Math.max(12, Math.floor(latency * 0.8)),
           features: ['Real-time Synchronization', 'Offline Persistence', 'Subcollections RBAC']

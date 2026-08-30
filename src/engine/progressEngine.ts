@@ -83,7 +83,7 @@ export function calculateDoubleProgression(
     currentWeightKg: decision.currentWeightKg,
     recommendedWeightKg: decision.recommendedWeightKg,
     currentReps: decision.targetRepRange,
-    recommendedReps: decision.recommendedTargetRepRange,
+    recommendedReps: decision.recommendedTargetReps,
     action: decision.action,
     explanation: decision.reason,
   };
