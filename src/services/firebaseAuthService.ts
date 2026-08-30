@@ -28,12 +28,17 @@ googleProvider.addScope('openid');
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 auth.useDeviceLanguage();
 
-// Keep the browser session stable across reloads and AI Studio Preview refreshes.
-// This does not change Firebase project credentials or payment configuration.
-void setPersistence(auth, browserLocalPersistence).catch(() => {
-  // Some embedded/preview browsers can reject persistence. Firebase Auth can
-  // still operate for the current session, so do not block application startup.
-});
+let persistenceReady: Promise<void> | null = null;
+const ensurePersistence = async (): Promise<void> => {
+  if (!persistenceReady) {
+    persistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => {
+      // Embedded/Preview browsers may reject persistent storage. Firebase can
+      // still authenticate for the current session, so do not block startup.
+    });
+  }
+  await persistenceReady;
+};
+void ensurePersistence();
 
 export type AuthState = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
@@ -44,9 +49,10 @@ export interface AuthenticatedAthlete {
   photoURL?: string;
   idToken: string;
   emailVerified: boolean;
-  /** Firebase account creation time, preserved across session refreshes. */
   createdAt?: string;
   profile: UserProfile;
+  /** True only for local/demo sessions; never use its idToken as a Firebase credential. */
+  isGuest?: boolean;
 }
 
 const DEFAULT_ATHLETE_PROFILE: UserProfile = {
@@ -60,13 +66,13 @@ const DEFAULT_ATHLETE_PROFILE: UserProfile = {
 let currentIdToken: string | null = null;
 let currentAthlete: AuthenticatedAthlete | null = null;
 
-export const getIdToken = (): string | null => currentIdToken;
+export const getIdToken = (): string | null => currentAthlete?.isGuest ? null : currentIdToken;
 export const getAuthenticatedAthlete = (): AuthenticatedAthlete | null => currentAthlete;
 
 export const getFreshIdToken = async (): Promise<string | null> => {
   const user = auth.currentUser;
-  if (!user) return null;
-  const token = await user.getIdToken();
+  if (!user || currentAthlete?.isGuest) return null;
+  const token = await user.getIdToken(true);
   currentIdToken = token;
   return token;
 };
@@ -82,43 +88,41 @@ export const buildAthleteFromFirebaseUser = async (user: User): Promise<Authenti
 
   const athlete: AuthenticatedAthlete = {
     uid: user.uid,
-    email: user.email || 'atleta@google.com',
+    email: user.email || '',
     displayName: user.displayName || 'Atleta Google',
     photoURL: user.photoURL || undefined,
     idToken: token,
     emailVerified: user.emailVerified,
     createdAt: user.metadata.creationTime || undefined,
     profile: buildProfileFromFirebaseUser(user),
+    isGuest: false,
   };
 
   currentAthlete = athlete;
   return athlete;
 };
 
+/** Local/demo-only session. Its mock token is intentionally never exposed by getIdToken(). */
 export const createGuestAthlete = (guestName = 'Atleta Convidado'): AuthenticatedAthlete => {
   const guestUid = `guest_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11)}`;
   const athlete: AuthenticatedAthlete = {
     uid: guestUid,
-    email: 'convidado@treinomax.app',
+    email: '',
     displayName: guestName,
     photoURL: undefined,
-    idToken: `mock_token_${guestUid}`,
+    idToken: '',
     emailVerified: false,
     createdAt: new Date().toISOString(),
     profile: { ...DEFAULT_ATHLETE_PROFILE, name: guestName },
+    isGuest: true,
   };
   currentAthlete = athlete;
-  currentIdToken = athlete.idToken;
+  currentIdToken = null;
   return athlete;
 };
 
-/**
- * Starts Google authentication using a popup first. If the browser/Preview
- * blocks popups, use Firebase's redirect flow instead of leaving the user
- * with an opaque failure. Unauthorized-domain is deliberately re-thrown:
- * only Firebase project configuration can authorize a domain.
- */
 export const signInWithGoogle = async (): Promise<AuthenticatedAthlete> => {
+  await ensurePersistence();
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return buildAthleteFromFirebaseUser(result.user);
@@ -127,10 +131,10 @@ export const signInWithGoogle = async (): Promise<AuthenticatedAthlete> => {
       ? String((error as { code?: unknown }).code)
       : '';
 
-    if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user') {
+    // Only a browser-blocked popup warrants redirect. Closing the popup is a
+    // user cancellation and must not trigger a second authentication flow.
+    if (code === 'auth/popup-blocked') {
       await signInWithRedirect(auth, googleProvider);
-      // The redirect leaves the current page. This rejection is only a
-      // defensive fallback for unusual browsers that do not navigate.
       throw new Error('REDIRECT_AUTH_STARTED');
     }
 
@@ -138,22 +142,21 @@ export const signInWithGoogle = async (): Promise<AuthenticatedAthlete> => {
   }
 };
 
-/**
- * Completes a Google redirect login, if Firebase has a pending result.
- * Safe to call on every application startup; returns null when none exists.
- */
 export const resolveGoogleRedirect = async (): Promise<AuthenticatedAthlete | null> => {
+  await ensurePersistence();
   const result = await getRedirectResult(auth);
   if (!result?.user) return null;
   return buildAthleteFromFirebaseUser(result.user);
 };
 
 export const signInWithEmailPassword = async (email: string, password: string): Promise<AuthenticatedAthlete> => {
+  await ensurePersistence();
   const userCred = await signInWithEmailAndPassword(auth, email.trim(), password);
   return buildAthleteFromFirebaseUser(userCred.user);
 };
 
 export const registerWithEmailPassword = async (email: string, password: string): Promise<AuthenticatedAthlete> => {
+  await ensurePersistence();
   const userCred = await createUserWithEmailAndPassword(auth, email.trim(), password);
   if (!userCred.user.emailVerified) await sendEmailVerification(userCred.user);
   return buildAthleteFromFirebaseUser(userCred.user);
