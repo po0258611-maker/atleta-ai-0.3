@@ -26,36 +26,27 @@ export class StripeGatewayProvider implements PaymentProvider {
   public providerName = 'stripe';
 
   private get secretKey(): string {
-    if (!SERVER_CONFIG.STRIPE_SECRET_KEY) {
-      throw new Error('STRIPE_SECRET_KEY_NOT_CONFIGURED');
-    }
+    if (!SERVER_CONFIG.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY_NOT_CONFIGURED');
     return SERVER_CONFIG.STRIPE_SECRET_KEY;
   }
 
   private async stripeRequest<T>(path: string, body?: URLSearchParams): Promise<T> {
     const response = await fetch(`https://api.stripe.com/v1/${path}`, {
       method: body ? 'POST' : 'GET',
-      headers: {
-        Authorization: `Bearer ${this.secretKey}`,
-        ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
-      },
+      headers: { Authorization: `Bearer ${this.secretKey}`, ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
       body: body?.toString(),
     });
-
     const payload = (await response.json()) as T & StripeErrorResponse;
     if (!response.ok) {
       const message = payload?.error?.message || `Stripe API request failed with status ${response.status}`;
       logger.error('Stripe API request failed', { path, status: response.status, message });
       throw new Error(`STRIPE_API_ERROR:${message}`);
     }
-
     return payload as T;
   }
 
   private getConfiguredPriceId(planSlug: CreatePaymentInput['planSlug']): string {
-    return planSlug === 'PRO'
-      ? SERVER_CONFIG.STRIPE_PRO_PRICE_ID
-      : SERVER_CONFIG.STRIPE_APEX_ELITE_PRICE_ID;
+    return planSlug === 'PRO' ? SERVER_CONFIG.STRIPE_PRO_PRICE_ID : SERVER_CONFIG.STRIPE_APEX_ELITE_PRICE_ID;
   }
 
   private getSuccessUrl(): string {
@@ -86,15 +77,12 @@ export class StripeGatewayProvider implements PaymentProvider {
     params.set('metadata[user_id]', input.userId);
     params.set('metadata[plan_slug]', input.planSlug);
     params.set('metadata[idempotency_key]', input.idempotencyKey);
-    // Persist metadata on the recurring Stripe Subscription as well as the Checkout Session.
     params.set('subscription_data[metadata][user_id]', input.userId);
     params.set('subscription_data[metadata][plan_slug]', input.planSlug);
     params.set('subscription_data[metadata][price_id]', priceId);
 
     const session = await this.stripeRequest<StripeCheckoutSession>('checkout/sessions', params);
-    if (!session.id || !session.url) {
-      throw new Error('STRIPE_INVALID_CHECKOUT_SESSION');
-    }
+    if (!session.id || !session.url) throw new Error('STRIPE_INVALID_CHECKOUT_SESSION');
 
     const now = new Date().toISOString();
     const payment: PersistedPayment = {
@@ -112,6 +100,7 @@ export class StripeGatewayProvider implements PaymentProvider {
       userEmail: input.userEmail,
       userName: input.userName,
       planSlug: input.planSlug,
+      providerSubscriptionId: session.subscription || undefined,
     };
 
     const persisted = await paymentRepository.createIfAbsent(payment);
@@ -121,39 +110,29 @@ export class StripeGatewayProvider implements PaymentProvider {
 
   async getPaymentStatus(transactionId: string): Promise<PaymentGatewayStatus> {
     const local = await paymentRepository.findByTransactionId(transactionId);
-    if (local && ['approved', 'failed', 'refunded', 'canceled'].includes(local.status)) {
-      return local.status;
-    }
+    if (local && ['approved', 'failed', 'refunded', 'canceled'].includes(local.status)) return local.status;
 
     const session = await this.stripeRequest<StripeCheckoutSession>(`checkout/sessions/${encodeURIComponent(transactionId)}`);
-
     let status: PaymentGatewayStatus = 'pending';
     if (session.status === 'expired') status = 'expired';
     else if (session.status === 'complete' && (session.payment_status === 'paid' || session.payment_status === 'no_payment_required')) status = 'approved';
     else if (session.status === 'complete' && session.payment_status === 'unpaid') status = 'pending';
 
-    if (local && local.status !== status) {
-      await paymentRepository.updateStatus(transactionId, status);
-    }
-
+    if (local && local.status !== status) await paymentRepository.updateStatus(transactionId, status);
     return status;
   }
 
   async cancelPayment(transactionId: string): Promise<boolean> {
     const session = await this.stripeRequest<StripeCheckoutSession>(`checkout/sessions/${encodeURIComponent(transactionId)}`);
     if (session.status === 'open') {
-      const params = new URLSearchParams();
-      await this.stripeRequest<StripeCheckoutSession>(`checkout/sessions/${encodeURIComponent(transactionId)}/expire`, params);
+      await this.stripeRequest<StripeCheckoutSession>(`checkout/sessions/${encodeURIComponent(transactionId)}/expire`, new URLSearchParams());
     }
-
     return (await paymentRepository.updateStatus(transactionId, 'canceled')) !== null;
   }
 
   async refundPayment(transactionId: string, amountCents?: number): Promise<boolean> {
     const session = await this.stripeRequest<StripeCheckoutSession>(`checkout/sessions/${encodeURIComponent(transactionId)}`);
-    if (!session.payment_intent || typeof session.payment_intent !== 'string') {
-      return false;
-    }
+    if (!session.payment_intent || typeof session.payment_intent !== 'string') return false;
 
     const params = new URLSearchParams();
     params.set('payment_intent', session.payment_intent);
