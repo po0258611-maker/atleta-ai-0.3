@@ -11,7 +11,8 @@ const corsOrigins = (process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split('
   .map((s) => s.trim())
   .filter(Boolean);
 
-const paymentMode = process.env.PAYMENT_MODE?.trim() === 'live' ? 'live' : 'mock';
+const rawPaymentMode = process.env.PAYMENT_MODE?.trim().toLowerCase();
+const paymentMode = rawPaymentMode === 'live' ? 'live' : 'mock';
 const configuredPort = Number(process.env.PORT);
 const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 3000;
 
@@ -34,6 +35,9 @@ function resolveFirebaseProjectId(): string {
   return 'gen-lang-client-0402109874';
 }
 
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || '';
+const pixWebhookSecret = process.env.PIX_WEBHOOK_SECRET?.trim() || '';
+
 export const SERVER_CONFIG = {
   PORT: port,
   NODE_ENV,
@@ -44,10 +48,44 @@ export const SERVER_CONFIG = {
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY?.trim() || '',
   FIREBASE_PROJECT_ID: resolveFirebaseProjectId(),
   PAYMENT_MODE: paymentMode,
-  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET?.trim() || 'whsec_test_stripe_secret_key_athleta_ai_2026',
-  PIX_WEBHOOK_SECRET: process.env.PIX_WEBHOOK_SECRET?.trim() || 'pix_whsec_test_secret_athleta_ai_2026',
+  STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
+  PIX_WEBHOOK_SECRET: pixWebhookSecret,
   TRUST_PROXY: process.env.TRUST_PROXY?.trim() === 'true',
   RATE_LIMIT_WINDOW_MS: 60 * 1000,
   RATE_LIMIT_MAX_REQUESTS: Math.max(1, Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 300),
   MAX_PROMPT_LENGTH: Math.max(100, Number(process.env.MAX_PROMPT_LENGTH) || 4000),
 };
+
+/**
+ * Production-only fail-closed configuration guard.
+ * Development/test environments may intentionally use mocks; production may not.
+ */
+export function validateProductionConfig(): void {
+  if (!isProduction) return;
+
+  const errors: string[] = [];
+
+  if (SERVER_CONFIG.PAYMENT_MODE !== 'live') {
+    errors.push('PAYMENT_MODE must be "live" in production; mock payment mode is forbidden.');
+  }
+
+  if (!SERVER_CONFIG.STRIPE_WEBHOOK_SECRET) {
+    errors.push('STRIPE_WEBHOOK_SECRET must be configured in production.');
+  }
+
+  if (!SERVER_CONFIG.PIX_WEBHOOK_SECRET) {
+    errors.push('PIX_WEBHOOK_SECRET must be configured in production.');
+  }
+
+  if (SERVER_CONFIG.CORS_ORIGINS.includes('*')) {
+    errors.push('CORS_ORIGINS must not contain "*" in production.');
+  }
+
+  if (SERVER_CONFIG.FIREBASE_PROJECT_ID === 'gen-lang-client-0402109874') {
+    errors.push('FIREBASE_PROJECT_ID must be explicitly configured for production.');
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Production configuration rejected:\n- ${errors.join('\n- ')}`);
+  }
+}
