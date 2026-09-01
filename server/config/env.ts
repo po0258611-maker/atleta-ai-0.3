@@ -46,6 +46,8 @@ export const SERVER_CONFIG = {
   PAYMENT_MODE: paymentMode,
   MERCADOPAGO_ACCESS_TOKEN: process.env.MERCADOPAGO_ACCESS_TOKEN?.trim() || '',
   MERCADOPAGO_ENV: (process.env.MERCADOPAGO_ENV?.trim() === 'production' ? 'production' : 'sandbox') as 'sandbox' | 'production',
+  MERCADOPAGO_WEBHOOK_SECRET: process.env.MERCADOPAGO_WEBHOOK_SECRET?.trim() || '',
+  MERCADOPAGO_NOTIFICATION_URL: process.env.MERCADOPAGO_NOTIFICATION_URL?.trim() || '',
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET?.trim() || 'whsec_test_stripe_secret_key_athleta_ai_2026',
   PIX_WEBHOOK_SECRET: process.env.PIX_WEBHOOK_SECRET?.trim() || 'pix_whsec_test_secret_athleta_ai_2026',
   TRUST_PROXY: process.env.TRUST_PROXY?.trim() === 'true',
