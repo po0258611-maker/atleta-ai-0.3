@@ -1,6 +1,6 @@
 /**
  * Test Suite: Firestore Backend Persistence Migration
- * 
+ *
  * Verifies the 10 Mandatory Requirements:
  * 1. Criar assinatura
  * 2. Recuperar assinatura (por userId e por subscriptionId)
@@ -16,7 +16,7 @@
 
 import { SubscriptionServerRepository } from '../repositories/subscriptionServerRepository';
 import { UsageRepository } from '../repositories/usageRepository';
-import { MemoryFirestoreAdapter, IFirestoreAdapter, AdminFirestoreAdapter } from '../repositories/firestoreAdapter';
+import { MemoryFirestoreAdapter, IFirestoreAdapter } from '../repositories/firestoreAdapter';
 import { ServerSubscription } from '../domain/subscriptionModel';
 import { getAdminFirestore } from '../services/firebaseAdmin';
 
@@ -148,15 +148,16 @@ async function runPersistenceTests() {
   console.assert(usageFailed === true, 'Falha do Firestore não pode ser silenciada na leitura de quota');
   console.log('✓ Teste 10: Tratamento explícito de falha de banco validado (Erros nunca convertidos em acesso livre)');
 
-  // Verificação de conectividade real com Firestore Cloud
-  console.log('--- VERIFICAÇÃO DE INTEGRAÇÃO COM FIRESTORE CLOUD REAL ---');
-  try {
+  // Optional cloud integration test. CI intentionally skips this because it has no GCP ADC.
+  // Run separately with RUN_FIRESTORE_INTEGRATION=true in an authenticated environment.
+  if (process.env.RUN_FIRESTORE_INTEGRATION === 'true') {
+    console.log('--- VERIFICAÇÃO DE INTEGRAÇÃO COM FIRESTORE CLOUD REAL ---');
     const liveAdminDb = getAdminFirestore();
     const liveTestDoc = liveAdminDb.collection('subscriptions').doc(`__ping_test_${Date.now()}`);
     await liveTestDoc.get();
     console.log('✓ INTEGRAÇÃO FIRESTORE CLOUD VALIDADA COM SUCESSO');
-  } catch (cloudErr: any) {
-    console.log(`[AVISO] INTEGRAÇÃO FIRESTORE NÃO VALIDADA (Ambiente de sandbox sem banco Cloud provisionado: ${cloudErr.message})`);
+  } else {
+    console.log('✓ Integração Firestore Cloud real ignorada: RUN_FIRESTORE_INTEGRATION não habilitado.');
   }
 
   console.log('----------------------------------------------------------------------');
