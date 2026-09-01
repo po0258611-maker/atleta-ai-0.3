@@ -98,6 +98,7 @@ export class StripeWebhookService {
     const resolvedUserId = userId || existing?.userId;
     if (!resolvedUserId) return { processed: false, reason: 'USER_NOT_FOUND' };
 
+    const existingPlanId = existing?.planId === 'PRO' || existing?.planId === 'APEX_ELITE' ? existing.planId : undefined;
     const period = subscriptionPeriod(object);
     let status = 'active';
     if (event.type.startsWith('customer.subscription.')) status = mapStripeSubscriptionStatus(object?.status);
@@ -115,7 +116,7 @@ export class StripeWebhookService {
           subscriptionId: subscriptionId || existing?.subscriptionId || '',
           userId: resolvedUserId,
           status,
-          planId: planId || existing?.planId,
+          planId: planId || existingPlanId,
           currentPeriodStart: period.start || existing?.currentPeriodStart,
           currentPeriodEnd: period.end || existing?.currentPeriodEnd,
           amountCents: amount ?? expectedAmount,
