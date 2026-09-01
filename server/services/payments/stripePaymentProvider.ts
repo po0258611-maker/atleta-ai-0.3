@@ -5,60 +5,54 @@ import {
   PaymentGatewayStatus,
 } from './paymentProvider.interface';
 import { logger } from '../../middlewares/logger';
+import { paymentRepository, PersistedPayment } from '../../repositories/paymentRepository';
 
 export class StripeGatewayProvider implements PaymentProvider {
   public providerName = 'stripe';
-  private transactions: Map<string, PaymentTransactionResult> = new Map();
-  private idempotencyStore: Map<string, PaymentTransactionResult> = new Map();
 
   async createPayment(input: CreatePaymentInput): Promise<PaymentTransactionResult> {
-    if (this.idempotencyStore.has(input.idempotencyKey)) {
-      return this.idempotencyStore.get(input.idempotencyKey)!;
-    }
+    const existing = await paymentRepository.findByIdempotencyKey(input.idempotencyKey);
+    if (existing) return existing;
 
+    const now = new Date().toISOString();
     const txId = `cs_stripe_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const result: PaymentTransactionResult = {
+    const result: PersistedPayment = {
       transactionId: txId,
       provider: this.providerName,
-      status: 'pending', // Starts pending until Stripe webhook signals checkout.session.completed
+      status: 'pending',
       amountCents: input.amountCents,
       currency: 'BRL',
       paymentMethod: 'credit_card',
       checkoutUrl: `https://checkout.stripe.com/c/pay/${txId}`,
       idempotencyKey: input.idempotencyKey,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+      userId: input.userId,
+      userEmail: input.userEmail,
+      userName: input.userName,
+      planSlug: input.planSlug,
     };
 
-    this.transactions.set(txId, result);
-    this.idempotencyStore.set(input.idempotencyKey, result);
-    logger.info(`Sessão Stripe Checkout criada: ${txId}`);
-    return result;
+    const persisted = await paymentRepository.createIfAbsent(result);
+    logger.info(`Sessão Stripe registrada de forma persistente: ${persisted.transactionId}`);
+    return persisted;
   }
 
   async getPaymentStatus(transactionId: string): Promise<PaymentGatewayStatus> {
-    const tx = this.transactions.get(transactionId);
+    const tx = await paymentRepository.findByTransactionId(transactionId);
     return tx ? tx.status : 'failed';
   }
 
   async updateStatusFromWebhook(transactionId: string, status: PaymentGatewayStatus): Promise<boolean> {
-    const tx = this.transactions.get(transactionId);
-    if (!tx) return false;
-    tx.status = status;
-    this.transactions.set(transactionId, tx);
-    return true;
+    const updated = await paymentRepository.updateStatus(transactionId, status);
+    return updated !== null;
   }
 
   async cancelPayment(transactionId: string): Promise<boolean> {
-    const tx = this.transactions.get(transactionId);
-    if (!tx) return false;
-    tx.status = 'canceled';
-    return true;
+    return (await paymentRepository.updateStatus(transactionId, 'canceled')) !== null;
   }
 
   async refundPayment(transactionId: string): Promise<boolean> {
-    const tx = this.transactions.get(transactionId);
-    if (!tx) return false;
-    tx.status = 'refunded';
-    return true;
+    return (await paymentRepository.updateStatus(transactionId, 'refunded')) !== null;
   }
 }
