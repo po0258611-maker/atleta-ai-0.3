@@ -5,12 +5,7 @@ import { paymentRepository } from '../repositories/paymentRepository';
 import { PaymentWebhookService } from './paymentWebhookService';
 import { WebhookSignatureVerifier } from './payments/webhookSignatureVerifier';
 
-interface StripeEvent {
-  id: string;
-  type: string;
-  created?: number;
-  data?: { object?: any };
-}
+interface StripeEvent { id: string; type: string; created?: number; data?: { object?: any } }
 
 const SUCCESS_EVENTS = new Set(['checkout.session.completed', 'invoice.payment_succeeded']);
 const FAILURE_EVENTS = new Set(['invoice.payment_failed']);
@@ -23,25 +18,32 @@ function expectedPlanByPriceId(priceId: unknown): 'PRO' | 'APEX_ELITE' | null {
   return null;
 }
 
-function normalizeCurrency(value: unknown): string {
-  return typeof value === 'string' ? value.toLowerCase() : '';
-}
+function normalizeCurrency(value: unknown): string { return typeof value === 'string' ? value.toLowerCase() : ''; }
+function asPositiveInteger(value: unknown): number | null { return Number.isInteger(value) && Number(value) > 0 ? Number(value) : null; }
+function subscriptionPriceId(object: any): string | null { return object?.items?.data?.[0]?.price?.id || object?.lines?.data?.[0]?.price?.id || null; }
 
-function asPositiveInteger(value: unknown): number | null {
-  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : null;
-}
-
-function subscriptionPriceId(object: any): string | null {
-  return object?.items?.data?.[0]?.price?.id || object?.lines?.data?.[0]?.price?.id || null;
+function toIsoUnix(value: unknown): string | undefined {
+  return typeof value === 'number' && value > 0 ? new Date(value * 1000).toISOString() : undefined;
 }
 
 function subscriptionPeriod(object: any): { start?: string; end?: string } {
-  const start = object?.current_period_start;
-  const end = object?.current_period_end;
   return {
-    start: typeof start === 'number' ? new Date(start * 1000).toISOString() : undefined,
-    end: typeof end === 'number' ? new Date(end * 1000).toISOString() : undefined,
+    start: toIsoUnix(object?.current_period_start) || toIsoUnix(object?.lines?.data?.[0]?.period?.start),
+    end: toIsoUnix(object?.current_period_end) || toIsoUnix(object?.lines?.data?.[0]?.period?.end),
   };
+}
+
+function mapStripeSubscriptionStatus(status: unknown): string {
+  switch (status) {
+    case 'active': return 'active';
+    case 'trialing': return 'trialing';
+    case 'canceled': return 'canceled';
+    case 'past_due':
+    case 'unpaid':
+    case 'incomplete': return 'past_due';
+    case 'incomplete_expired': return 'expired';
+    default: return 'past_due';
+  }
 }
 
 export class StripeWebhookService {
@@ -52,12 +54,7 @@ export class StripeWebhookService {
     if (!verification.valid) return { processed: false, reason: verification.reason };
 
     let event: StripeEvent;
-    try {
-      event = JSON.parse(rawPayload) as StripeEvent;
-    } catch {
-      return { processed: false, reason: 'INVALID_JSON' };
-    }
-
+    try { event = JSON.parse(rawPayload) as StripeEvent; } catch { return { processed: false, reason: 'INVALID_JSON' }; }
     if (!event.id || !event.type || !event.data?.object) return { processed: false, reason: 'INVALID_STRIPE_EVENT' };
     if (!SUPPORTED_EVENTS.has(event.type)) return { processed: true, reason: 'UNSUPPORTED_EVENT_IGNORED' };
 
@@ -76,23 +73,16 @@ export class StripeWebhookService {
     if (priceId) planId = expectedPlanByPriceId(priceId) || undefined;
     if (!planId && metadata.plan_slug === 'PRO') planId = 'PRO';
     if (!planId && metadata.plan_slug === 'APEX_ELITE') planId = 'APEX_ELITE';
-
     if (event.type !== 'customer.subscription.deleted' && !planId) return { processed: false, reason: 'INVALID_STRIPE_PRICE' };
 
     const plan = planId ? getPaidPlan(planId) : null;
     const expectedAmount = plan?.amountCents;
-    const amount =
-      asPositiveInteger(object?.amount_total) ??
-      asPositiveInteger(object?.amount_paid) ??
-      asPositiveInteger(object?.amount_received) ??
-      asPositiveInteger(object?.amount);
+    const amount = asPositiveInteger(object?.amount_total) ?? asPositiveInteger(object?.amount_paid) ?? asPositiveInteger(object?.amount_received) ?? asPositiveInteger(object?.amount);
 
     if (event.type === 'checkout.session.completed' || event.type === 'invoice.payment_succeeded') {
       if (normalizeCurrency(object?.currency) !== 'brl') return { processed: false, reason: 'INVALID_CURRENCY' };
       if (amount === null || expectedAmount === undefined || amount !== expectedAmount) return { processed: false, reason: 'INVALID_AMOUNT' };
-      if (event.type === 'checkout.session.completed' && !['paid', 'no_payment_required'].includes(object?.payment_status)) {
-        return { processed: false, reason: 'PAYMENT_NOT_SETTLED' };
-      }
+      if (event.type === 'checkout.session.completed' && !['paid', 'no_payment_required'].includes(object?.payment_status)) return { processed: false, reason: 'PAYMENT_NOT_SETTLED' };
     }
 
     if (event.type === 'customer.subscription.created' || event.type === 'customer.subscription.updated') {
@@ -102,18 +92,17 @@ export class StripeWebhookService {
       if (unitAmount === null || expectedAmount === undefined || unitAmount !== expectedAmount) return { processed: false, reason: 'INVALID_AMOUNT' };
     }
 
-    if (event.type === 'customer.subscription.deleted' && priceId && !expectedPlanByPriceId(priceId)) {
-      return { processed: false, reason: 'INVALID_STRIPE_PRICE' };
-    }
+    if (event.type === 'customer.subscription.deleted' && priceId && !expectedPlanByPriceId(priceId)) return { processed: false, reason: 'INVALID_STRIPE_PRICE' };
 
     const existing = subscriptionId ? await subscriptionServerRepository.findBySubscriptionId(subscriptionId) : null;
     const resolvedUserId = userId || existing?.userId;
     if (!resolvedUserId) return { processed: false, reason: 'USER_NOT_FOUND' };
 
     const period = subscriptionPeriod(object);
-    const status = event.type === 'customer.subscription.deleted' || FAILURE_EVENTS.has(event.type)
-      ? (event.type === 'customer.subscription.deleted' ? 'canceled' : 'past_due')
-      : 'active';
+    let status = 'active';
+    if (event.type.startsWith('customer.subscription.')) status = mapStripeSubscriptionStatus(object?.status);
+    else if (event.type === 'invoice.payment_failed') status = 'past_due';
+    else if (event.type === 'customer.subscription.deleted') status = 'canceled';
 
     const result = await this.genericWebhookService.handleWebhook({
       payload: {
