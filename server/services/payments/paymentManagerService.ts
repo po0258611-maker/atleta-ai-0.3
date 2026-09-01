@@ -4,7 +4,6 @@ import {
   PaymentTransactionResult,
   PaymentGatewayStatus,
 } from './paymentProvider.interface';
-import { PixPaymentProvider } from './pixPaymentProvider';
 import { MercadoPagoPixProvider } from './mercadoPagoPixProvider';
 import { StripeGatewayProvider } from './stripePaymentProvider';
 import { subscriptionServerRepository } from '../../repositories/subscriptionServerRepository';
@@ -13,7 +12,6 @@ import { getPaidPlan } from '../../config/plans';
 import { SERVER_CONFIG } from '../../config/env';
 
 export class PaymentManagerService {
-  private pixProvider = new PixPaymentProvider();
   private mercadoPagoPixProvider = new MercadoPagoPixProvider();
   private stripeProvider = new StripeGatewayProvider();
 
@@ -21,8 +19,10 @@ export class PaymentManagerService {
     switch (method) {
       case 'pix':
       case 'pix_direct':
-        if (SERVER_CONFIG.MERCADOPAGO_ACCESS_TOKEN) return this.mercadoPagoPixProvider;
-        return this.pixProvider;
+        if (!SERVER_CONFIG.MERCADOPAGO_ACCESS_TOKEN) {
+          throw new Error('MERCADOPAGO_NOT_CONFIGURED');
+        }
+        return this.mercadoPagoPixProvider;
       case 'credit_card':
       case 'stripe':
         return this.stripeProvider;
