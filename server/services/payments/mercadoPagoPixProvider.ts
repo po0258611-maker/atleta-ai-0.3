@@ -28,20 +28,14 @@ type MercadoPagoPayment = {
 
 function mapStatus(status?: string): PaymentGatewayStatus {
   switch (status) {
-    case 'approved':
-      return 'approved';
-    case 'rejected':
-      return 'failed';
+    case 'approved': return 'approved';
+    case 'rejected': return 'failed';
     case 'cancelled':
-    case 'canceled':
-      return 'canceled';
+    case 'canceled': return 'canceled';
     case 'refunded':
-    case 'charged_back':
-      return 'refunded';
-    case 'expired':
-      return 'expired';
-    default:
-      return 'pending';
+    case 'charged_back': return 'refunded';
+    case 'expired': return 'expired';
+    default: return 'pending';
   }
 }
 
@@ -90,9 +84,7 @@ export class MercadoPagoPixProvider implements PaymentProvider {
   }
 
   async createPayment(input: CreatePaymentInput): Promise<PaymentTransactionResult> {
-    if (input.paymentMethod !== 'pix') {
-      throw new Error('PAYMENT_METHOD_NOT_SUPPORTED');
-    }
+    if (input.paymentMethod !== 'pix') throw new Error('PAYMENT_METHOD_NOT_SUPPORTED');
 
     const amount = Number((input.amountCents / 100).toFixed(2));
     const externalReference = Buffer.from(
@@ -106,14 +98,11 @@ export class MercadoPagoPixProvider implements PaymentProvider {
       payment_method_id: 'pix',
       payer: { email: input.userEmail },
       external_reference: externalReference,
-      metadata: {
-        athlete_user_id: input.userId,
-        plan_slug: input.planSlug,
-      },
+      metadata: { athlete_user_id: input.userId, plan_slug: input.planSlug },
     };
 
-    if (process.env.MERCADOPAGO_NOTIFICATION_URL?.trim()) {
-      body.notification_url = process.env.MERCADOPAGO_NOTIFICATION_URL.trim();
+    if (SERVER_CONFIG.MERCADOPAGO_NOTIFICATION_URL) {
+      body.notification_url = SERVER_CONFIG.MERCADOPAGO_NOTIFICATION_URL;
     }
 
     const payment = await this.request<MercadoPagoPayment>('/v1/payments', {
@@ -125,7 +114,9 @@ export class MercadoPagoPixProvider implements PaymentProvider {
     if (!payment.id) throw new Error('MERCADOPAGO_INVALID_RESPONSE');
 
     const transactionData = payment.point_of_interaction?.transaction_data;
-    const createdAt = new Date().toISOString();
+    const qrCodeUrl = transactionData?.qr_code_base64
+      ? `data:image/png;base64,${transactionData.qr_code_base64}`
+      : transactionData?.ticket_url;
 
     return {
       transactionId: String(payment.id),
@@ -134,34 +125,28 @@ export class MercadoPagoPixProvider implements PaymentProvider {
       amountCents: Math.round(Number(payment.transaction_amount ?? amount) * 100),
       currency: 'BRL',
       paymentMethod: 'pix',
-      qrCodeUrl: transactionData?.ticket_url,
+      qrCodeUrl,
       copiaECola: transactionData?.qr_code,
       expiresAt: payment.date_of_expiration,
       idempotencyKey: input.idempotencyKey,
-      createdAt,
+      createdAt: new Date().toISOString(),
     };
   }
 
   async getPaymentStatus(transactionId: string): Promise<PaymentGatewayStatus> {
-    const payment = await this.request<MercadoPagoPayment>(`/v1/payments/${encodeURIComponent(transactionId)}`, {
-      method: 'GET',
-    });
+    const payment = await this.request<MercadoPagoPayment>(`/v1/payments/${encodeURIComponent(transactionId)}`, { method: 'GET' });
     return mapStatus(payment.status);
   }
 
   async cancelPayment(_transactionId: string): Promise<boolean> {
-    // Mercado Pago's payment lifecycle does not expose a generic cancellation
-    // operation suitable for every Pix state. Refunds are handled explicitly.
     return false;
   }
 
   async refundPayment(transactionId: string, amountCents?: number): Promise<boolean> {
-    const headers = { 'X-Idempotency-Key': crypto.randomUUID() };
     const body = amountCents === undefined ? undefined : JSON.stringify({ amount: amountCents / 100 });
-
     await this.request(`/v1/payments/${encodeURIComponent(transactionId)}/refunds`, {
       method: 'POST',
-      headers,
+      headers: { 'X-Idempotency-Key': crypto.randomUUID() },
       body,
     });
     return true;
@@ -189,21 +174,17 @@ export class MercadoPagoPixProvider implements PaymentProvider {
     }
 
     const tsNumber = Number(timestamp);
-    if (!Number.isFinite(tsNumber) || tsNumber <= 0) {
-      return { valid: false, reason: 'INVALID_TIMESTAMP' };
-    }
+    if (!Number.isFinite(tsNumber) || tsNumber <= 0) return { valid: false, reason: 'INVALID_TIMESTAMP' };
 
     const now = Math.floor(Date.now() / 1000);
     const normalizedTs = tsNumber > 1_000_000_000_000 ? Math.floor(tsNumber / 1000) : tsNumber;
-    if (Math.abs(now - normalizedTs) > toleranceSeconds) {
-      return { valid: false, reason: 'INVALID_TIMESTAMP' };
-    }
+    if (Math.abs(now - normalizedTs) > toleranceSeconds) return { valid: false, reason: 'INVALID_TIMESTAMP' };
 
     const manifest = `id:${dataId};request-id:${xRequestId};ts:${timestamp};`;
     const expected = crypto.createHmac('sha256', secret).update(manifest, 'utf8').digest('hex');
-
     const expectedBuffer = Buffer.from(expected, 'hex');
     const receivedBuffer = Buffer.from(signature, 'hex');
+
     if (receivedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(receivedBuffer, expectedBuffer)) {
       return { valid: false, reason: 'INVALID_SIGNATURE' };
     }
@@ -212,8 +193,6 @@ export class MercadoPagoPixProvider implements PaymentProvider {
   }
 
   async getPayment(transactionId: string): Promise<MercadoPagoPayment> {
-    return this.request<MercadoPagoPayment>(`/v1/payments/${encodeURIComponent(transactionId)}`, {
-      method: 'GET',
-    });
+    return this.request<MercadoPagoPayment>(`/v1/payments/${encodeURIComponent(transactionId)}`, { method: 'GET' });
   }
 }
