@@ -32,12 +32,13 @@ export class StripeGatewayProvider implements PaymentProvider {
     return SERVER_CONFIG.STRIPE_SECRET_KEY;
   }
 
-  private async stripeRequest<T>(path: string, body?: URLSearchParams): Promise<T> {
+  private async stripeRequest<T>(path: string, body?: URLSearchParams, idempotencyKey?: string): Promise<T> {
     const response = await fetch(`https://api.stripe.com/v1/${path}`, {
       method: body ? 'POST' : 'GET',
       headers: {
         Authorization: `Bearer ${this.secretKey}`,
         ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
       },
       body: body?.toString(),
     });
@@ -53,9 +54,12 @@ export class StripeGatewayProvider implements PaymentProvider {
   }
 
   private getConfiguredPriceId(planSlug: CreatePaymentInput['planSlug']): string {
-    return planSlug === 'PRO'
+    const priceId = planSlug === 'PRO'
       ? SERVER_CONFIG.STRIPE_PRO_PRICE_ID
       : SERVER_CONFIG.STRIPE_APEX_ELITE_PRICE_ID;
+
+    if (!priceId) throw new Error(`STRIPE_PRICE_ID_NOT_CONFIGURED:${planSlug}`);
+    return priceId;
   }
 
   private getSuccessUrl(): string {
@@ -85,7 +89,14 @@ export class StripeGatewayProvider implements PaymentProvider {
     params.set('metadata[plan_slug]', input.planSlug);
     params.set('metadata[idempotency_key]', input.idempotencyKey);
 
-    const session = await this.stripeRequest<StripeCheckoutSession>('checkout/sessions', params);
+    // The same idempotency key is sent to Stripe and persisted locally. This
+    // protects against the failure window where Stripe succeeds but Firestore
+    // is temporarily unavailable before the transaction can be recorded.
+    const session = await this.stripeRequest<StripeCheckoutSession>(
+      'checkout/sessions',
+      params,
+      input.idempotencyKey
+    );
     if (!session.id || !session.url) {
       throw new Error('STRIPE_INVALID_CHECKOUT_SESSION');
     }
