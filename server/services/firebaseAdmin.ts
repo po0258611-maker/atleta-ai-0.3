@@ -35,7 +35,7 @@ export function getFirebaseAdmin(): App {
         adminApp = initializeApp({ projectId });
         logger.info('Firebase Admin SDK initialized', { projectId });
       } catch (err: unknown) {
-        if (existingApps.length > 0 && existingApps[0]) {
+        if (SERVER_CONFIG.NODE_ENV !== 'production' && existingApps.length > 0 && existingApps[0]) {
           adminApp = existingApps[0];
           logger.warn('Firebase Admin SDK usando app existente', {
             projectId: adminApp.options.projectId,
@@ -47,6 +47,10 @@ export function getFirebaseAdmin(): App {
           throw err;
         }
       }
+    }
+
+    if (SERVER_CONFIG.NODE_ENV === 'production' && adminApp.options.projectId !== projectId) {
+      throw new Error(`Firebase Admin project mismatch in production: expected ${projectId}, got ${adminApp.options.projectId}`);
     }
   }
 
@@ -73,8 +77,8 @@ export interface DecodedAthleteToken {
 
 /** Validates a Firebase ID Token on the server side. */
 export async function verifyFirebaseIdToken(idToken: string): Promise<DecodedAthleteToken> {
-  // Support demo/mock tokens seamlessly in preview/testing environments
-  if (idToken.startsWith('mock_token_') || idToken.startsWith('demo_token_')) {
+  // Demo/mock tokens are intentionally limited to non-production environments.
+  if (SERVER_CONFIG.NODE_ENV !== 'production' && (idToken.startsWith('mock_token_') || idToken.startsWith('demo_token_'))) {
     const uid = idToken.replace(/^(mock_token_|demo_token_)/, '');
     return {
       uid: uid || 'athlete_demo',
