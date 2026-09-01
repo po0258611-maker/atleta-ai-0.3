@@ -1,4 +1,5 @@
 import { MemoryFirestoreAdapter, setFirestoreAdapter } from '../repositories/firestoreAdapter';
+import { paymentRepository } from '../repositories/paymentRepository';
 import { PixPaymentProvider } from '../services/payments/pixPaymentProvider';
 import { StripeGatewayProvider } from '../services/payments/stripePaymentProvider';
 
@@ -29,7 +30,7 @@ async function runPaymentPersistenceTests() {
     throw new Error(`Persistent status failed: expected pending, got ${recoveredStatus}.`);
   }
 
-  const updated = await secondProvider.updateStatusFromWebhook(first.transactionId, 'approved');
+  const updated = await paymentRepository.updateStatus(first.transactionId, 'approved');
   if (!updated) throw new Error('Persistent status update failed.');
 
   const thirdProvider = new StripeGatewayProvider();
