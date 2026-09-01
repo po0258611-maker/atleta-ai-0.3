@@ -6,6 +6,7 @@ export interface PersistedPayment extends PaymentTransactionResult {
   userEmail: string;
   userName: string;
   planSlug: 'PRO' | 'APEX_ELITE';
+  providerSubscriptionId?: string;
   updatedAt: string;
 }
 
@@ -73,6 +74,17 @@ export class PaymentRepository {
       .doc(docIdForTransaction(transactionId))
       .set(updated);
     return updated;
+  }
+
+  async updateStatusBySubscriptionId(subscriptionId: string, status: PaymentGatewayStatus): Promise<PersistedPayment | null> {
+    const snapshot = await getFirestoreAdapter().collection(COLLECTION).get();
+    const match = snapshot.docs.find((doc: any) => {
+      const data = doc.data() as PersistedPayment;
+      return data.provider === 'stripe' && data.providerSubscriptionId === subscriptionId;
+    });
+
+    if (!match) return null;
+    return this.updateStatus(match.id, status);
   }
 }
 
