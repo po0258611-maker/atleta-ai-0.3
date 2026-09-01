@@ -12,8 +12,8 @@ interface StripeEvent {
   data?: { object?: any };
 }
 
-const SUCCESS_EVENTS = new Set(['checkout.session.completed', 'invoice.payment_succeeded', 'payment_intent.succeeded']);
-const FAILURE_EVENTS = new Set(['invoice.payment_failed', 'payment_intent.payment_failed']);
+const SUCCESS_EVENTS = new Set(['checkout.session.completed', 'invoice.payment_succeeded']);
+const FAILURE_EVENTS = new Set(['invoice.payment_failed']);
 const SUBSCRIPTION_EVENTS = new Set(['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted']);
 const SUPPORTED_EVENTS = new Set([...SUCCESS_EVENTS, ...FAILURE_EVENTS, ...SUBSCRIPTION_EVENTS]);
 
@@ -58,19 +58,15 @@ export class StripeWebhookService {
       return { processed: false, reason: 'INVALID_JSON' };
     }
 
-    if (!event.id || !event.type || !event.data?.object) {
-      return { processed: false, reason: 'INVALID_STRIPE_EVENT' };
-    }
-
-    if (!SUPPORTED_EVENTS.has(event.type)) {
-      return { processed: true, reason: 'UNSUPPORTED_EVENT_IGNORED' };
-    }
+    if (!event.id || !event.type || !event.data?.object) return { processed: false, reason: 'INVALID_STRIPE_EVENT' };
+    if (!SUPPORTED_EVENTS.has(event.type)) return { processed: true, reason: 'UNSUPPORTED_EVENT_IGNORED' };
 
     const object = event.data.object;
     const metadata = object?.metadata || {};
     const customerId = typeof object?.customer === 'string' ? object.customer : null;
-    const subscriptionId = typeof object?.subscription === 'string' ? object.subscription : (typeof object?.id === 'string' && event.type.startsWith('customer.subscription.') ? object.id : null);
-    const paymentIntentId = typeof object?.payment_intent === 'string' ? object.payment_intent : null;
+    const subscriptionId = typeof object?.subscription === 'string'
+      ? object.subscription
+      : (typeof object?.id === 'string' && event.type.startsWith('customer.subscription.') ? object.id : null);
     const userId = typeof metadata.user_id === 'string' && metadata.user_id ? metadata.user_id : undefined;
 
     if (!customerId && !subscriptionId) return { processed: false, reason: 'MISSING_STRIPE_IDENTIFIERS' };
@@ -81,13 +77,10 @@ export class StripeWebhookService {
     if (!planId && metadata.plan_slug === 'PRO') planId = 'PRO';
     if (!planId && metadata.plan_slug === 'APEX_ELITE') planId = 'APEX_ELITE';
 
-    if (event.type !== 'customer.subscription.deleted' && !planId) {
-      return { processed: false, reason: 'INVALID_STRIPE_PRICE' };
-    }
+    if (event.type !== 'customer.subscription.deleted' && !planId) return { processed: false, reason: 'INVALID_STRIPE_PRICE' };
 
     const plan = planId ? getPaidPlan(planId) : null;
     const expectedAmount = plan?.amountCents;
-
     const amount =
       asPositiveInteger(object?.amount_total) ??
       asPositiveInteger(object?.amount_paid) ??
@@ -96,9 +89,7 @@ export class StripeWebhookService {
 
     if (event.type === 'checkout.session.completed' || event.type === 'invoice.payment_succeeded') {
       if (normalizeCurrency(object?.currency) !== 'brl') return { processed: false, reason: 'INVALID_CURRENCY' };
-      if (amount === null || expectedAmount === undefined || amount !== expectedAmount) {
-        return { processed: false, reason: 'INVALID_AMOUNT' };
-      }
+      if (amount === null || expectedAmount === undefined || amount !== expectedAmount) return { processed: false, reason: 'INVALID_AMOUNT' };
       if (event.type === 'checkout.session.completed' && !['paid', 'no_payment_required'].includes(object?.payment_status)) {
         return { processed: false, reason: 'PAYMENT_NOT_SETTLED' };
       }
@@ -115,7 +106,7 @@ export class StripeWebhookService {
       return { processed: false, reason: 'INVALID_STRIPE_PRICE' };
     }
 
-    let existing = subscriptionId ? await subscriptionServerRepository.findBySubscriptionId(subscriptionId) : null;
+    const existing = subscriptionId ? await subscriptionServerRepository.findBySubscriptionId(subscriptionId) : null;
     const resolvedUserId = userId || existing?.userId;
     if (!resolvedUserId) return { processed: false, reason: 'USER_NOT_FOUND' };
 
@@ -145,16 +136,16 @@ export class StripeWebhookService {
       signatureHeader,
     });
 
-    if (paymentIntentId) {
-      const checkoutSessionId = typeof object?.id === 'string' && event.type === 'checkout.session.completed' ? object.id : undefined;
-      const payment = checkoutSessionId ? await paymentRepository.findByTransactionId(checkoutSessionId) : null;
-      if (payment) {
-        const paymentStatus = SUCCESS_EVENTS.has(event.type) ? 'approved' : FAILURE_EVENTS.has(event.type) ? 'failed' : payment.status;
-        if (payment.status !== paymentStatus) await paymentRepository.updateStatus(payment.transactionId, paymentStatus as any);
+    if (result.processed) {
+      if (event.type === 'checkout.session.completed' && typeof object.id === 'string') {
+        await paymentRepository.updateStatus(object.id, 'approved');
+      } else if (subscriptionId && SUCCESS_EVENTS.has(event.type)) {
+        await paymentRepository.updateStatusBySubscriptionId(subscriptionId, 'approved');
+      } else if (subscriptionId && FAILURE_EVENTS.has(event.type)) {
+        await paymentRepository.updateStatusBySubscriptionId(subscriptionId, 'failed');
       }
     }
 
-    existing = result.subscription || existing;
     return { processed: result.processed, reason: result.reason };
   }
 }
