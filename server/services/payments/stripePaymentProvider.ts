@@ -73,6 +73,8 @@ export class StripeGatewayProvider implements PaymentProvider {
     if (existing) return existing;
 
     const priceId = this.getConfiguredPriceId(input.planSlug);
+    if (!priceId) throw new Error('STRIPE_PRICE_ID_NOT_CONFIGURED');
+
     const params = new URLSearchParams();
     params.set('mode', 'subscription');
     params.set('success_url', this.getSuccessUrl());
@@ -84,6 +86,10 @@ export class StripeGatewayProvider implements PaymentProvider {
     params.set('metadata[user_id]', input.userId);
     params.set('metadata[plan_slug]', input.planSlug);
     params.set('metadata[idempotency_key]', input.idempotencyKey);
+    // Persist metadata on the recurring Stripe Subscription as well as the Checkout Session.
+    params.set('subscription_data[metadata][user_id]', input.userId);
+    params.set('subscription_data[metadata][plan_slug]', input.planSlug);
+    params.set('subscription_data[metadata][price_id]', priceId);
 
     const session = await this.stripeRequest<StripeCheckoutSession>('checkout/sessions', params);
     if (!session.id || !session.url) {
