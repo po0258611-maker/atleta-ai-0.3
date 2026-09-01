@@ -9,7 +9,7 @@ import { subscriptionRouter } from "./server/routes/subscriptionRoutes";
 import { databaseRouter } from "./server/routes/databaseRoutes";
 import { errorHandler } from "./server/middlewares/errorHandler";
 import { logger } from "./server/middlewares/logger";
-import { SERVER_CONFIG } from "./server/config/env";
+import { SERVER_CONFIG, validateProductionConfig } from "./server/config/env";
 import { getFirestoreAdapter } from "./server/repositories/firestoreAdapter";
 
 function applySecurityHeaders(app: express.Express) {
@@ -37,6 +37,8 @@ function applySecurityHeaders(app: express.Express) {
 }
 
 function isTrustedAiStudioOrigin(originStr: string): boolean {
+  if (SERVER_CONFIG.NODE_ENV === "production") return false;
+
   try {
     const url = new URL(originStr);
     const host = url.hostname.toLowerCase();
@@ -69,10 +71,9 @@ function applyCors(app: express.Express) {
     const host = req.headers.host;
     const isSameOrigin = Boolean(host && (origin === `http://${host}` || origin === `https://${host}`));
     const isAllowed =
-      allowedOrigins.has("*") ||
       allowedOrigins.has(origin) ||
-      isSameOrigin ||
-      isTrustedAiStudioOrigin(origin);
+      (SERVER_CONFIG.NODE_ENV !== "production" && isTrustedAiStudioOrigin(origin)) ||
+      isSameOrigin;
 
     if (!isAllowed) {
       if (req.method === "OPTIONS") {
@@ -80,7 +81,9 @@ function applyCors(app: express.Express) {
           error: { code: "CORS_ORIGIN_DENIED", message: "Origem não autorizada." },
         });
       }
-      return next();
+      return res.status(403).json({
+        error: { code: "CORS_ORIGIN_DENIED", message: "Origem não autorizada." },
+      });
     }
 
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -97,6 +100,8 @@ function applyCors(app: express.Express) {
 }
 
 async function startServer() {
+  validateProductionConfig();
+
   const app = express();
   const PORT = SERVER_CONFIG.PORT;
   const isProduction = SERVER_CONFIG.NODE_ENV === "production";
@@ -128,17 +133,29 @@ async function startServer() {
     });
   });
 
-  app.get("/api/ready", (_req, res) => {
+  app.get("/api/ready", async (_req, res) => {
     const isProd = SERVER_CONFIG.NODE_ENV === "production";
     const dbAdapter = getFirestoreAdapter();
-    const hasDb = Boolean(dbAdapter);
     const buildArtifactReady = !isProd || fs.existsSync(path.join(process.cwd(), "dist", "index.html"));
-    const ready = hasDb && buildArtifactReady;
+
+    let databaseReady = false;
+    try {
+      // A real read proves that the configured Firestore connection is usable.
+      // In production the adapter is fail-closed and cannot silently switch to memory.
+      await dbAdapter.collection("__system_health__").doc("readiness").get();
+      databaseReady = true;
+    } catch (error) {
+      logger.warn("Readiness check: Firestore indisponível", {
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+
+    const ready = databaseReady && buildArtifactReady;
 
     if (!ready) {
       return res.status(503).json({
         status: "not_ready",
-        checks: { database: hasDb, buildArtifacts: buildArtifactReady },
+        checks: { database: databaseReady, buildArtifacts: buildArtifactReady },
         timestamp: new Date().toISOString(),
       });
     }
@@ -146,7 +163,7 @@ async function startServer() {
     return res.status(200).json({
       status: "ready",
       version: "2.1.0",
-      checks: { database: hasDb, buildArtifacts: buildArtifactReady },
+      checks: { database: databaseReady, buildArtifacts: buildArtifactReady },
       timestamp: new Date().toISOString(),
     });
   });

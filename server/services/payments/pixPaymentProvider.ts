@@ -5,31 +5,31 @@ import {
   PaymentGatewayStatus,
 } from './paymentProvider.interface';
 import { logger } from '../../middlewares/logger';
+import { paymentRepository, PersistedPayment } from '../../repositories/paymentRepository';
 
 export class PixPaymentProvider implements PaymentProvider {
   public providerName = 'pix_direct';
-  private transactions: Map<string, { status: PaymentGatewayStatus; data: PaymentTransactionResult }> = new Map();
-  private idempotencyStore: Map<string, PaymentTransactionResult> = new Map();
 
   async createPayment(input: CreatePaymentInput): Promise<PaymentTransactionResult> {
-    // 1. Idempotency Check
-    if (this.idempotencyStore.has(input.idempotencyKey)) {
-      logger.info(`Transação Pix recuperada do cache idempotente: ${input.idempotencyKey}`);
-      return this.idempotencyStore.get(input.idempotencyKey)!;
+    const existing = await paymentRepository.findByIdempotencyKey(input.idempotencyKey);
+    if (existing) {
+      logger.info(`Transação Pix recuperada do armazenamento persistente: ${input.idempotencyKey}`);
+      return existing;
     }
 
     const txId = `pix_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const amountFormatted = (input.amountCents / 100).toFixed(2);
-    
-    // Real standard EMV BR Code PIX Payload format
-    const copiaECola = `00020126580014br.gov.bcb.pix0136athleta.ai.pagamentos@gmail.com5204000053039865405${amountFormatted}5802BR5910ATHLETA AI6009SAO PAULO62070503***6304${txId.substring(0, 8)}`;
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(copiaECola)}&size=250&margin=1`;
+    const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-    const result: PaymentTransactionResult = {
+    // This remains the existing simulated EMV payload until a real PSP is integrated.
+    const copiaECola = `00020126580014br.gov.bcb.pix0136athleta.ai.pagamentos@gmail.com5204000053039865405${amountFormatted}5802BR5910ATHLETA AI6009SAO PAULO62070503***6304${txId.substring(0, 8)}`;
+    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(copiaECola)}&size=250&margin=1`;
+
+    const result: PersistedPayment = {
       transactionId: txId,
       provider: this.providerName,
-      status: 'pending', // Strictly starts in PENDING until webhook/polling verification
+      status: 'pending',
       amountCents: input.amountCents,
       currency: 'BRL',
       paymentMethod: 'pix',
@@ -37,54 +37,43 @@ export class PixPaymentProvider implements PaymentProvider {
       qrCodeUrl,
       expiresAt,
       idempotencyKey: input.idempotencyKey,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+      userId: input.userId,
+      userEmail: input.userEmail,
+      userName: input.userName,
+      planSlug: input.planSlug,
     };
 
-    this.transactions.set(txId, { status: 'pending', data: result });
-    this.idempotencyStore.set(input.idempotencyKey, result);
-
-    logger.info(`Ordem PIX gerada: ${txId} | Valor: R$ ${amountFormatted} | Status: PENDING`);
-    return result;
+    const persisted = await paymentRepository.createIfAbsent(result);
+    logger.info(`Ordem PIX persistida: ${persisted.transactionId} | Valor: R$ ${amountFormatted} | Status: PENDING`);
+    return persisted;
   }
 
   async getPaymentStatus(transactionId: string): Promise<PaymentGatewayStatus> {
-    const tx = this.transactions.get(transactionId);
+    const tx = await paymentRepository.findByTransactionId(transactionId);
     if (!tx) return 'failed';
 
-    // Check expiration
-    if (tx.status === 'pending' && tx.data.expiresAt && new Date(tx.data.expiresAt).getTime() < Date.now()) {
-      tx.status = 'expired';
-      this.transactions.set(transactionId, tx);
+    if (tx.status === 'pending' && tx.expiresAt && new Date(tx.expiresAt).getTime() < Date.now()) {
+      await paymentRepository.updateStatus(transactionId, 'expired');
+      return 'expired';
     }
 
     return tx.status;
   }
 
-  /**
-   * Called by Webhook when bank confirms settlement
-   */
   async approvePaymentFromWebhook(transactionId: string): Promise<boolean> {
-    const tx = this.transactions.get(transactionId);
-    if (!tx) return false;
-    tx.status = 'approved';
-    this.transactions.set(transactionId, tx);
+    const updated = await paymentRepository.updateStatus(transactionId, 'approved');
+    if (!updated) return false;
     logger.info(`PIX liquidado e aprovado via webhook bancário: ${transactionId}`);
     return true;
   }
 
   async cancelPayment(transactionId: string): Promise<boolean> {
-    const tx = this.transactions.get(transactionId);
-    if (!tx) return false;
-    tx.status = 'canceled';
-    this.transactions.set(transactionId, tx);
-    return true;
+    return (await paymentRepository.updateStatus(transactionId, 'canceled')) !== null;
   }
 
   async refundPayment(transactionId: string): Promise<boolean> {
-    const tx = this.transactions.get(transactionId);
-    if (!tx) return false;
-    tx.status = 'refunded';
-    this.transactions.set(transactionId, tx);
-    return true;
+    return (await paymentRepository.updateStatus(transactionId, 'refunded')) !== null;
   }
 }

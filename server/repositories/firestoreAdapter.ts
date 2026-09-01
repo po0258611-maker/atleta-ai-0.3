@@ -44,6 +44,9 @@ const allowMemoryFallback =
   process.env.FIRESTORE_ALLOW_MEMORY_FALLBACK === 'true';
 
 function isFirestoreUnavailableError(err: any): boolean {
+  // In production, Firestore failures must propagate. Silent in-memory fallback
+  // would make persistent state appear healthy while writes are not durable.
+  if (!allowMemoryFallback) return false;
   if (!err) return false;
   const msg = (err.message || String(err)).toLowerCase();
   const code = err.code;
@@ -66,8 +69,8 @@ function isFirestoreUnavailableError(err: any): boolean {
 
 /**
  * Firebase Admin Firestore adapter.
- * Uses Firestore Admin SDK and provides resilient fallback when server-side credentials
- * or IAM permissions are restricted in sandbox environments.
+ * Uses Firestore Admin SDK and provides resilient fallback only when explicitly
+ * enabled for a non-production environment with FIRESTORE_ALLOW_MEMORY_FALLBACK=true.
  */
 export class AdminFirestoreAdapter implements IFirestoreAdapter {
   private memoryFallback: MemoryFirestoreAdapter;
@@ -103,7 +106,8 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
         const fallbackDoc = fallbackCol.doc(id);
 
         if (!docRef) {
-          return fallbackDoc;
+          if (allowMemoryFallback) return fallbackDoc;
+          throw new Error('Firestore document reference unavailable and memory fallback is disabled.');
         }
 
         return {
@@ -151,7 +155,8 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
         ),
       get: async () => {
         if (!colRef) {
-          return fallbackCol.get();
+          if (allowMemoryFallback) return fallbackCol.get();
+          throw new Error('Firestore collection reference unavailable and memory fallback is disabled.');
         }
         try {
           const snap = await colRef.get();
@@ -211,7 +216,8 @@ export class AdminFirestoreAdapter implements IFirestoreAdapter {
 
 function createAdminQuery(queryRef: any, fallbackQueryGetter?: () => IFirestoreQuery): IFirestoreQuery {
   if (!queryRef && fallbackQueryGetter) {
-    return fallbackQueryGetter();
+    if (allowMemoryFallback) return fallbackQueryGetter();
+    throw new Error('Firestore query reference unavailable and memory fallback is disabled.');
   }
 
   return {
@@ -227,7 +233,8 @@ function createAdminQuery(queryRef: any, fallbackQueryGetter?: () => IFirestoreQ
       ),
     get: async () => {
       if (!queryRef && fallbackQueryGetter) {
-        return fallbackQueryGetter().get();
+        if (allowMemoryFallback) return fallbackQueryGetter().get();
+        throw new Error('Firestore query reference unavailable and memory fallback is disabled.');
       }
       try {
         const snap = await queryRef.get();
