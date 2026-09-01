@@ -37,6 +37,11 @@ function resolveFirebaseProjectId(): string {
 
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || '';
 const pixWebhookSecret = process.env.PIX_WEBHOOK_SECRET?.trim() || '';
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim() || '';
+const stripeProPriceId = process.env.STRIPE_PRO_PRICE_ID?.trim() || '';
+const stripeApexElitePriceId = process.env.STRIPE_APEX_ELITE_PRICE_ID?.trim() || '';
+const stripeSuccessUrl = process.env.STRIPE_SUCCESS_URL?.trim() || '';
+const stripeCancelUrl = process.env.STRIPE_CANCEL_URL?.trim() || '';
 
 export const SERVER_CONFIG = {
   PORT: port,
@@ -48,6 +53,11 @@ export const SERVER_CONFIG = {
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY?.trim() || '',
   FIREBASE_PROJECT_ID: resolveFirebaseProjectId(),
   PAYMENT_MODE: paymentMode,
+  STRIPE_SECRET_KEY: stripeSecretKey,
+  STRIPE_PRO_PRICE_ID: stripeProPriceId,
+  STRIPE_APEX_ELITE_PRICE_ID: stripeApexElitePriceId,
+  STRIPE_SUCCESS_URL: stripeSuccessUrl,
+  STRIPE_CANCEL_URL: stripeCancelUrl,
   STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
   PIX_WEBHOOK_SECRET: pixWebhookSecret,
   TRUST_PROXY: process.env.TRUST_PROXY?.trim() === 'true',
@@ -67,6 +77,22 @@ export function validateProductionConfig(): void {
 
   if (SERVER_CONFIG.PAYMENT_MODE !== 'live') {
     errors.push('PAYMENT_MODE must be "live" in production; mock payment mode is forbidden.');
+  }
+
+  if (!SERVER_CONFIG.STRIPE_SECRET_KEY) {
+    errors.push('STRIPE_SECRET_KEY must be configured in production.');
+  }
+
+  if (!SERVER_CONFIG.STRIPE_PRO_PRICE_ID) {
+    errors.push('STRIPE_PRO_PRICE_ID must be configured in production.');
+  }
+
+  if (!SERVER_CONFIG.STRIPE_APEX_ELITE_PRICE_ID) {
+    errors.push('STRIPE_APEX_ELITE_PRICE_ID must be configured in production.');
+  }
+
+  if (!SERVER_CONFIG.STRIPE_SUCCESS_URL || !SERVER_CONFIG.STRIPE_CANCEL_URL) {
+    errors.push('STRIPE_SUCCESS_URL and STRIPE_CANCEL_URL must be configured in production.');
   }
 
   if (!SERVER_CONFIG.STRIPE_WEBHOOK_SECRET) {
